@@ -1,0 +1,23 @@
+# Qwen API Settings
+QWEN_API_KEY=sk-your-api-key-here
+QWEN_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+
+# Cloudflare R2 Settings
+R2_ACCOUNT_ID=your-account-id
+R2_ACCESS_KEY_ID=your-access-key-id
+R2_SECRET_ACCESS_KEY=your-secret-access-key
+R2_BUCKET_NAME=your-bucket-name
+R2_PUBLIC_URL_BASE=https://your-bucket.r2.dev
+
+# Video Processing Settings
+VIDEO_PREPROMPT=Analyze this video in detail. Describe all activities, objects, people, and events. Provide a comprehensive analysis.
+VIDEO_CHUNK_DURATION=600
+VIDEO_FPS=2
+
+# Storage Settings
+RECORDINGS_DIR=recordings
+CHROMA_DB_DIR=./chroma_db
+CHROMA_COLLECTION_NAME=video_analysis
+
+# Search Settings
+DEFAULT_SEARCH_RESULTS=5

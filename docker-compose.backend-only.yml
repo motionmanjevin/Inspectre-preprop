@@ -1,0 +1,22 @@
+version: '3.8'
+
+# Simplified compose file for backend only
+# Run Electron natively on the Pi, backend in Docker
+
+services:
+  inspectre-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend-only
+    container_name: inspectre-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./recordings:/app/recordings
+      - ./chroma_db:/app/chroma_db
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    devices:
+      - /dev/video0:/dev/video0  # If using camera
+    restart: unless-stopped
+    network_mode: host

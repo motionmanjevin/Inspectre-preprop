@@ -1,0 +1,30 @@
+services:
+  inspectre:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inspectre
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount data directories to persist data
+      - ./recordings:/app/recordings
+      - ./chroma_db:/app/chroma_db
+      - ./logs:/app/logs
+      # Mount .env file if it exists
+      - ./.env:/app/.env:ro
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+    # For Raspberry Pi, you may need to add device access
+    devices:
+      - /dev/video0:/dev/video0  # If using camera (comment out if not needed)
+    # Enable GPU if needed (for OpenCV)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    restart: unless-stopped
+    network_mode: host  # Use host network for easier access
