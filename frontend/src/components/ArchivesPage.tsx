@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Trash2, MessageSquare, Eye, Bell, Plus, X } from "lucide-react";
-import { getAuthToken } from "../services/api";
+import { alertsApi, getAuthToken } from "../services/api";
 
 interface Message {
   id: string;
@@ -80,11 +80,8 @@ export function ArchivesPage({
 
   const fetchAlerts = async () => {
     try {
-      const response = await fetch("http://localhost:8000/alerts");
-      if (response.ok) {
-        const data = await response.json();
-        setAlerts(data.alerts || []);
-      }
+      const data = await alertsApi.list();
+      setAlerts(data.alerts || []);
     } catch (error) {
       console.error("Error fetching alerts:", error);
     }
@@ -92,11 +89,8 @@ export function ArchivesPage({
 
   const fetchAlertHistory = async () => {
     try {
-      const response = await fetch("http://localhost:8000/alerts/history?limit=100");
-      if (response.ok) {
-        const data = await response.json();
-        setAlertHistory(data.history || []);
-      }
+      const data = await alertsApi.history(100);
+      setAlertHistory(data.history || []);
     } catch (error) {
       console.error("Error fetching alert history:", error);
     }
@@ -107,17 +101,10 @@ export function ArchivesPage({
     
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/alerts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: newAlertQuery, enabled: true }),
-      });
-      
-      if (response.ok) {
-        setNewAlertQuery("");
-        setShowCreateAlert(false);
-        fetchAlerts();
-      }
+      await alertsApi.create(newAlertQuery.trim());
+      setNewAlertQuery("");
+      setShowCreateAlert(false);
+      fetchAlerts();
     } catch (error) {
       console.error("Error creating alert:", error);
     } finally {
@@ -127,15 +114,8 @@ export function ArchivesPage({
 
   const toggleAlert = async (alertId: string, currentEnabled: boolean) => {
     try {
-      const response = await fetch(`http://localhost:8000/alerts/${alertId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !currentEnabled }),
-      });
-      
-      if (response.ok) {
-        fetchAlerts();
-      }
+      await alertsApi.update(alertId, { enabled: !currentEnabled });
+      fetchAlerts();
     } catch (error) {
       console.error("Error toggling alert:", error);
     }
@@ -143,14 +123,9 @@ export function ArchivesPage({
 
   const deleteAlert = async (alertId: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/alerts/${alertId}`, {
-        method: "DELETE",
-      });
-      
-      if (response.ok) {
-        fetchAlerts();
-        fetchAlertHistory();
-      }
+      await alertsApi.remove(alertId);
+      fetchAlerts();
+      fetchAlertHistory();
     } catch (error) {
       console.error("Error deleting alert:", error);
     }

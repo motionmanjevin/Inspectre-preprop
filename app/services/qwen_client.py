@@ -11,6 +11,38 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+_MAX_ERROR_BODY_CHARS = 2000
+
+
+def _format_http_error_response(response: requests.Response) -> str:
+    """
+    Format an HTTP error response for logging/exception messages without
+    dumping unbounded data into logs.
+    """
+    try:
+        content_type = response.headers.get("content-type", "")
+    except Exception:
+        content_type = ""
+
+    # Prefer JSON error payloads when available, but fall back to text.
+    body: str
+    try:
+        if "application/json" in (content_type or "").lower():
+            body = str(response.json())
+        else:
+            body = response.text
+    except Exception:
+        try:
+            body = response.text
+        except Exception:
+            body = "(unavailable)"
+
+    body = body or ""
+    if len(body) > _MAX_ERROR_BODY_CHARS:
+        body = body[:_MAX_ERROR_BODY_CHARS] + "...(truncated)"
+
+    return f"status_code={response.status_code} content_type={content_type!r} body={body}"
+
 
 class QwenVLClient:
     """Client for Qwen 3 VL Plus and Qwen 3 VL Flash APIs."""
@@ -98,13 +130,19 @@ class QwenVLClient:
                 timeout=300  # 5 minute timeout for video processing
             )
             
-            response.raise_for_status()
+            if not response.ok:
+                details = _format_http_error_response(response)
+                error_msg = f"Qwen 3 VL Plus API request rejected. {details}"
+                logger.error(error_msg)
+                raise QwenAPIError(error_msg)
+
             result = response.json()
             logger.info("Qwen 3 VL Plus processing complete")
             return result
             
         except RequestException as e:
-            error_msg = f"Qwen 3 VL Plus API request failed: {str(e)}"
+            # Network/transport-level errors (no HTTP body available).
+            error_msg = f"Qwen 3 VL Plus API request failed (transport error): {str(e)}"
             logger.error(error_msg)
             raise QwenAPIError(error_msg) from e
         except Exception as e:
@@ -163,7 +201,12 @@ class QwenVLClient:
                 timeout=300  # 5 minute timeout
             )
             
-            response.raise_for_status()
+            if not response.ok:
+                details = _format_http_error_response(response)
+                error_msg = f"Qwen 3 VL Flash API request rejected. {details}"
+                logger.error(error_msg)
+                raise QwenAPIError(error_msg)
+
             result = response.json()
             
             # Extract raw content from response
@@ -172,7 +215,7 @@ class QwenVLClient:
             return content
             
         except RequestException as e:
-            error_msg = f"Qwen 3 VL Flash API request failed: {str(e)}"
+            error_msg = f"Qwen 3 VL Flash API request failed (transport error): {str(e)}"
             logger.error(error_msg)
             raise QwenAPIError(error_msg) from e
         except (KeyError, IndexError) as e:

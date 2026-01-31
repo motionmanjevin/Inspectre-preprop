@@ -255,6 +255,65 @@ export const healthApi = {
 };
 
 /**
+ * Alerts API
+ */
+export interface Alert {
+  id: string;
+  query: string;
+  enabled: boolean;
+  created_at: string;
+  trigger_count: number;
+}
+
+export interface AlertHistoryEntry {
+  id: string;
+  alert_id: string;
+  alert_query: string;
+  video_url: string;
+  local_path?: string;
+  timestamp: string;
+  analysis_snippet?: string;
+}
+
+export interface AlertListResponse {
+  alerts: Alert[];
+}
+
+export interface AlertHistoryListResponse {
+  history: AlertHistoryEntry[];
+}
+
+export const alertsApi = {
+  async list(): Promise<AlertListResponse> {
+    return apiRequest('/alerts');
+  },
+
+  async create(query: string): Promise<Alert> {
+    return apiRequest('/alerts', {
+      method: 'POST',
+      body: JSON.stringify({ query, enabled: true }),
+    });
+  },
+
+  async update(alertId: string, payload: { query?: string; enabled?: boolean }): Promise<Alert> {
+    return apiRequest(`/alerts/${alertId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async remove(alertId: string): Promise<void> {
+    await apiRequest(`/alerts/${alertId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async history(limit: number = 100): Promise<AlertHistoryListResponse> {
+    return apiRequest(`/alerts/history?limit=${encodeURIComponent(String(limit))}`);
+  },
+};
+
+/**
  * Auth API
  */
 export interface User {
@@ -317,5 +376,6 @@ export default {
   search: searchApi,
   analysis: analysisApi,
   health: healthApi,
+  alerts: alertsApi,
   auth: authApi,
 };

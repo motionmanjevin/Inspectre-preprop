@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Optional, Callable, Dict, Set
 import threading
+from collections import deque
 
 from app.utils.exceptions import VideoRecordingError
 from app.core.config import get_settings
@@ -226,16 +227,34 @@ class VideoRecorder:
             ) from e
 
         self.current_ffmpeg_process = proc
+        stderr_tail: deque[str] = deque(maxlen=30)
+
+        def _drain_stderr() -> None:
+            try:
+                assert proc.stderr is not None
+                for line in proc.stderr:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    stderr_tail.append(line)
+                    # Keep per-line logs at DEBUG to avoid spam; tail will be surfaced on failure.
+                    logger.debug(f"ffmpeg: {line}")
+            except Exception:
+                pass
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True, name="FFmpegStderr")
+        stderr_thread.start()
 
         try:
             # Block until stopped (stop_recording terminates the process)
-            _stdout, stderr = proc.communicate()
+            proc.wait()
         finally:
             self.current_ffmpeg_process = None
 
-        # If we didn't request stop and ffmpeg exited, treat as failure
-        if not self._stop_event.is_set() and proc.returncode not in (0, None):
-            tail = (stderr or "").strip().splitlines()[-15:]
+        # If we didn't request stop and ffmpeg exited for any reason, treat as failure.
+        # Otherwise the API will keep reporting recording=True even though nothing is happening.
+        if not self._stop_event.is_set():
+            tail = list(stderr_tail)
             raise VideoRecordingError(
                 "FFmpeg exited unexpectedly while recording. "
                 f"exit_code={proc.returncode} stderr_tail={' | '.join(tail) if tail else '(none)'}"
@@ -693,3 +712,6 @@ class VideoRecorder:
             logger.error(f"Error in recording loop: {e}", exc_info=True)
             self.is_recording = False
             raise VideoRecordingError(f"Recording failed: {str(e)}") from e
+        finally:
+            # If the recording loop exits, recording is no longer active.
+            self.is_recording = False

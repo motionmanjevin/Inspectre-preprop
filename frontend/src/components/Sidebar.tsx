@@ -1,6 +1,6 @@
 import { X, Settings, Home, RefreshCw, Archive, LogOut } from "lucide-react";
 import { useState, useEffect } from "react";
-import { searchApi, ProcessingStatsResponse } from "../services/api";
+import { searchApi, recordingApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
 
 export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }: { 
   isOpen: boolean; 
@@ -10,6 +10,7 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
   onLogout: () => void;
 }) {
   const [stats, setStats] = useState<ProcessingStatsResponse | null>(null);
+  const [recordingStatus, setRecordingStatus] = useState<RecordingStatus | null>(null);
 
   // Fetch processing stats on mount and periodically
   useEffect(() => {
@@ -28,6 +29,14 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
     } catch (error) {
       // Silently fail - backend might not be running
       console.debug("Failed to fetch processing stats:", error);
+    }
+
+    try {
+      const status = await recordingApi.getStatus();
+      setRecordingStatus(status);
+    } catch (error) {
+      // Silently fail - backend might not be running / user not authed yet
+      console.debug("Failed to fetch recording status:", error);
     }
   };
 
@@ -114,6 +123,21 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
               <X className="w-5 h-5 text-gray-400" />
             </button>
           </div>
+
+          {/* Recording status */}
+          {recordingStatus?.recording && (
+            <div className="mt-4 bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                <span className="text-xs text-green-400 font-medium">Recording Active</span>
+              </div>
+              {recordingStatus.rtsp_url && (
+                <div className="text-[11px] text-green-400/70 mt-1 break-all">
+                  {recordingStatus.rtsp_url}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Spacer */}
