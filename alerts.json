@@ -1,1 +1,16 @@
-{}
+{
+  "855e13fc-5a7b-4b0c-b44e-8b08f144ef1b": {
+    "id": "855e13fc-5a7b-4b0c-b44e-8b08f144ef1b",
+    "query": "alert me if you see anyone put their head on the table",
+    "enabled": false,
+    "created_at": "2026-01-31T14:20:47.951740",
+    "trigger_count": 1
+  },
+  "a2f94871-3525-42c1-a1db-440dd4dc64e3": {
+    "id": "a2f94871-3525-42c1-a1db-440dd4dc64e3",
+    "query": "alert me if you see anyone wearing red",
+    "enabled": false,
+    "created_at": "2026-01-31T15:43:59.589621",
+    "trigger_count": 3
+  }
+}

@@ -66,7 +66,121 @@ class QwenVLClient:
             "Content-Type": "application/json"
         }
         logger.info("QwenVLClient initialized")
-    
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """
+        Get embeddings for a list of texts using Qwen embedding model (e.g. text-embedding-v3).
+        Batches in groups of 10 (API limit). Returns list of embedding vectors in same order as input.
+        """
+        settings = get_settings()
+        model = settings.QWEN_EMBEDDING_MODEL
+        batch_size = 10
+        all_embeddings: List[List[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            payload = {
+                "model": model,
+                "input": batch,
+                "dimensions": 1024,
+                "encoding_format": "float",
+            }
+            try:
+                response = requests.post(
+                    f"{self.base_url}/embeddings",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=60,
+                )
+                if not response.ok:
+                    details = _format_http_error_response(response)
+                    raise QwenAPIError(f"Qwen embedding API rejected. {details}")
+                data = response.json()
+                # OpenAI-compatible response: data[].embedding, data[].index
+                items = data.get("data", [])
+                for item in sorted(items, key=lambda x: x.get("index", 0)):
+                    all_embeddings.append(item["embedding"])
+            except RequestException as e:
+                raise QwenAPIError(f"Qwen embedding request failed: {e}") from e
+        return all_embeddings
+
+    def rerank_documents(
+        self,
+        query: str,
+        documents: List[str],
+        top_n: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Rerank documents by relevance to query using Qwen reranker.
+        Supports qwen3-rerank (Singapore, compatible API) and gte-rerank-v2 (Beijing, DashScope API).
+        Returns list of { "index": int, "relevance_score": float } sorted by relevance (best first).
+        """
+        if not documents:
+            return []
+        settings = get_settings()
+        model = settings.QWEN_RERANK_MODEL
+        
+        # qwen3-rerank uses compatible API format (Singapore)
+        # gte-rerank-v2 uses DashScope API format (Beijing)
+        if model == "qwen3-rerank":
+            # Compatible API endpoint: /compatible-api/v1/reranks
+            rerank_base = self.base_url.replace("compatible-mode/v1", "compatible-api/v1")
+            url = f"{rerank_base}/reranks"
+            payload = {
+                "model": model,
+                "query": query,
+                "documents": documents,
+                "top_n": min(top_n, len(documents)),
+            }
+        else:
+            # DashScope API endpoint (for gte-rerank-v2)
+            rerank_base = self.base_url.replace("compatible-mode/v1", "api/v1")
+            url = f"{rerank_base}/services/rerank/text-rerank/text-rerank"
+            payload = {
+                "model": model,
+                "input": {
+                    "query": query,
+                    "documents": documents,
+                },
+                "parameters": {
+                    "top_n": min(top_n, len(documents)),
+                    "return_documents": False,
+                },
+            }
+        
+        try:
+            response = requests.post(
+                url,
+                headers=self.headers,
+                json=payload,
+                timeout=120,
+            )
+            if not response.ok:
+                details = _format_http_error_response(response)
+                raise QwenAPIError(f"Qwen rerank API rejected. {details}")
+            data = response.json()
+            
+            # Try different response formats:
+            # 1. DashScope format: output.results
+            # 2. Compatible API might return results directly or in data.results
+            results = []
+            if "output" in data and "results" in data["output"]:
+                results = data["output"]["results"]
+            elif "results" in data:
+                results = data["results"]
+            elif "data" in data and isinstance(data["data"], list):
+                results = data["data"]
+            
+            # Debug: log response structure if empty
+            if not results:
+                logger.warning(f"Rerank API returned empty results. Response keys: {list(data.keys())}")
+                logger.debug(f"Full response: {str(data)[:500]}")
+            else:
+                logger.debug(f"Rerank returned {len(results)} results. First result keys: {list(results[0].keys()) if results else 'none'}")
+            
+            return results
+        except RequestException as e:
+            raise QwenAPIError(f"Qwen rerank request failed: {e}") from e
+
     def process_video_plus(
         self,
         video_url: str,

@@ -1,6 +1,9 @@
 """ChromaDB storage service."""
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.qwen_client import QwenVLClient
 import json
 from datetime import datetime, date, timedelta
 
@@ -156,74 +159,106 @@ class ChromaStore:
         self,
         query: str,
         n_results: int = 5,
-        target_date: Optional[date] = None
+        target_date: Optional[date] = None,
+        rerank_client: Optional["QwenVLClient"] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Search for relevant video clips based on query.
-        
+        Search for relevant video clips based on query using Qwen reranker.
+        Fetches all clips in time window, then reranks by relevance (no ChromaDB similarity).
+
         Args:
             query: Search query text
             n_results: Number of results to return
             target_date: Specific date to filter. If None, uses last 24 hours.
-        
+            rerank_client: Qwen client with rerank_documents(); required for search.
+
         Returns:
-            List of dictionaries containing video_url and metadata
-        
-        Raises:
-            ChromaDBError: If search fails
+            List of dicts with video_url, metadata, relevance_score (and distance for compat).
         """
         try:
             query = (query or "").strip()
             if not query:
                 return []
+            if rerank_client is None:
+                logger.warning("search_clips called without rerank_client; returning no results")
+                return []
 
             settings = get_settings()
-            # Guardrails so we never return "everything" by accident.
             n_results = max(1, min(int(n_results or settings.DEFAULT_SEARCH_RESULTS), settings.MAX_SEARCH_RESULTS))
-
-            # Build time filter
             time_filter = self._get_time_filter(target_date)
-            
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=n_results,
+
+            # Get all clips in time window (candidate documents)
+            results = self.collection.get(
                 where=time_filter,
-                include=["metadatas", "distances"]
+                include=["metadatas", "documents"],
             )
+            ids = results.get("ids") or []
+            if not ids:
+                date_desc = target_date.isoformat() if target_date else "last 24 hours"
+                logger.info(f"Found 0 clips for query '{query[:50]}...' in {date_desc}")
+                return []
+
+            metadatas = results.get("metadatas") or []
+            documents_raw = results.get("documents") or []
             
+            # Log what we found
+            logger.info(f"Retrieved {len(ids)} clips from ChromaDB for reranking")
+            
+            max_chars = getattr(settings, "QWEN_RERANK_MAX_CHARS_PER_DOC", 16000)
+            max_docs = getattr(settings, "QWEN_RERANK_MAX_DOCS", 500)
+            documents = []
+            for i, doc in enumerate(documents_raw):
+                text = (doc or "").strip()
+                if not text:
+                    logger.warning(f"Clip {i} has empty document text")
+                    continue
+                if len(text) > max_chars:
+                    text = text[:max_chars] + "..."
+                documents.append(text)
+            documents = documents[:max_docs]
+            
+            if not documents:
+                logger.warning(f"No valid document texts found for reranking (had {len(documents_raw)} raw docs)")
+                return []
+
+            logger.info(f"Sending {len(documents)} documents to Qwen reranker (query: '{query[:50]}...')")
+            # Rerank with Qwen (get more candidates than needed, then filter by score)
+            rerank_results = rerank_client.rerank_documents(query, documents, top_n=min(n_results * 2, len(documents)))
+            logger.info(f"Reranker returned {len(rerank_results)} results")
+            
+            # Filter by minimum relevance score
+            min_score = getattr(settings, "CLIP_MIN_RELEVANCE_SCORE", 0.3)
             clips = []
-            if results["ids"] and len(results["ids"][0]) > 0:
-                # Helpful for debugging relevance tuning
-                distances_list = results.get("distances", [[]])[0] if results.get("distances") else []
-                if distances_list:
-                    try:
-                        logger.debug(
-                            "Chroma query distances: min=%.4f max=%.4f n=%d query='%s...'",
-                            min(distances_list),
-                            max(distances_list),
-                            len(distances_list),
-                            query[:50],
-                        )
-                    except Exception:
-                        pass
+            for r in rerank_results:
+                idx = r.get("index", 0)
+                score = r.get("relevance_score", 0.0)
+                
+                # Filter out low-relevance clips
+                if score < min_score:
+                    logger.debug(f"Skipping clip {idx}: score {score:.4f} < min {min_score}")
+                    continue
+                
+                if idx >= len(metadatas):
+                    logger.warning(f"Rerank result index {idx} out of range (have {len(metadatas)} metadatas)")
+                    continue
+                meta = metadatas[idx]
+                clip = {
+                    "video_url": meta.get("video_url", ""),
+                    "metadata": meta,
+                    "relevance_score": score,
+                    "distance": 1.0 - score,
+                }
+                clips.append(clip)
+                logger.info(f"Added clip {idx}: score={score:.4f}, url={meta.get('video_url', '')[:50]}...")
+                
+                # Stop once we have enough results
+                if len(clips) >= n_results:
+                    break
 
-                for i in range(len(results["ids"][0])):
-                    distance = results["distances"][0][i] if "distances" in results else None
-                    # Filter out low-relevance matches when distances are available.
-                    if distance is not None and distance > settings.CLIP_MAX_DISTANCE:
-                        continue
-
-                    clip = {
-                        "video_url": results["metadatas"][0][i]["video_url"],
-                        "metadata": results["metadatas"][0][i],
-                        "distance": distance
-                    }
-                    clips.append(clip)
-            
             date_desc = target_date.isoformat() if target_date else "last 24 hours"
             logger.info(f"Found {len(clips)} clips for query '{query[:50]}...' in {date_desc}")
             return clips
-            
+
         except ChromaError as e:
             error_msg = f"ChromaDB error searching clips: {str(e)}"
             logger.error(error_msg)

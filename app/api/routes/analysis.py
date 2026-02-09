@@ -58,33 +58,27 @@ async def analyze_videos(
         chroma_store = get_chroma_store()
         settings = get_settings()
         
-        # Get relevant video clips (with time filtering)
+        # Get relevant video clips (Qwen rerank)
+        qwen_client = get_qwen_client()
         clips = chroma_store.search_clips(
             query=request.query,
             n_results=request.n_results or settings.DEFAULT_SEARCH_RESULTS,
-            target_date=request.target_date
+            target_date=request.target_date,
+            rerank_client=qwen_client,
         )
-        
-        # Analysis should be strict: filter out weak matches so we don't waste Qwen credits.
-        # (Clip search can be more permissive; analysis should only run on genuinely relevant chunks.)
-        strong_clips = []
-        for c in clips:
-            d = c.get("distance")
-            if d is None:
-                continue
-            if d <= settings.ANALYSIS_MAX_DISTANCE:
-                strong_clips.append(c)
+        # Filter by min relevance score before sending to VL Flash
+        min_score = getattr(settings, "ANALYSIS_MIN_RELEVANCE_SCORE", 0.0)
+        strong_clips = [c for c in clips if (c.get("relevance_score") or 0) >= min_score]
 
         if not strong_clips:
             date_desc = request.target_date.isoformat() if request.target_date else "last 24 hours"
             logger.info(
                 f"No relevant videos found for query '{request.query[:50]}...' in {date_desc} "
-                f"(candidates={len(clips)}, analysis_max_distance={settings.ANALYSIS_MAX_DISTANCE})"
+                f"(candidates={len(clips)}, analysis_min_relevance_score={min_score})"
             )
             return AnalysisResponse(results=[], query=request.query)
-        
+
         # Process each video sequentially with Qwen 3 VL Flash
-        qwen_client = get_qwen_client()
         results = []
         
         for clip in strong_clips:

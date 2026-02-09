@@ -7,6 +7,7 @@ from app.api.models.requests import QueryRequest
 from app.api.models.responses import ClipSearchResponse, ClipInfo, AvailableDatesResponse, ProcessingStatsResponse
 from app.api.dependencies import get_current_user
 from app.services.chroma_store import ChromaStore
+from app.services.qwen_client import QwenVLClient
 from app.core.config import get_settings
 from app.utils.exceptions import ChromaDBError
 
@@ -22,6 +23,12 @@ def get_chroma_store() -> ChromaStore:
         collection_name=settings.CHROMA_COLLECTION_NAME,
         persist_directory=settings.CHROMA_DB_DIR
     )
+
+
+def get_qwen_client() -> QwenVLClient:
+    """Get Qwen API client (for embedding/rerank and VL)."""
+    settings = get_settings()
+    return QwenVLClient(api_key=settings.QWEN_API_KEY, base_url=settings.QWEN_BASE_URL)
 
 
 @router.get("/stats", response_model=ProcessingStatsResponse)
@@ -114,17 +121,18 @@ async def search_clips(
     """
     try:
         chroma_store = get_chroma_store()
+        qwen_client = get_qwen_client()
         clips_data = chroma_store.search_clips(
             query=request.query,
             n_results=request.n_results or get_settings().DEFAULT_SEARCH_RESULTS,
-            target_date=request.target_date
+            target_date=request.target_date,
+            rerank_client=qwen_client,
         )
-        
         clips = [
             ClipInfo(
                 video_url=clip["video_url"],
                 metadata=clip["metadata"],
-                distance=clip.get("distance")
+                distance=clip.get("distance"),
             )
             for clip in clips_data
         ]

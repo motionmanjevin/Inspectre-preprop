@@ -1,1 +1,38 @@
-[]
+[
+  {
+    "id": "cfaea6b3-b254-42fe-9d68-ab13e33b4ffa",
+    "alert_id": "a2f94871-3525-42c1-a1db-440dd4dc64e3",
+    "alert_query": "alert me if you see anyone wearing red",
+    "video_url": "https://pub-12cca1351fa148f9a39e3866e22bef21.r2.dev/chunk_20260131_155154.mp4",
+    "local_path": "chunk_20260131_155154.mp4",
+    "timestamp": "2026-01-31T15:53:19.748392",
+    "analysis_snippet": "This video captures a quiet, focused study or work environment\u2014likely a library, computer lab, or co-working space\u2014with four individuals seated at wooden tables, each engaged in individual tasks.\n\n**S"
+  },
+  {
+    "id": "d2966b92-077c-4738-a541-a71a593e7072",
+    "alert_id": "a2f94871-3525-42c1-a1db-440dd4dc64e3",
+    "alert_query": "alert me if you see anyone wearing red",
+    "video_url": "https://pub-12cca1351fa148f9a39e3866e22bef21.r2.dev/chunk_20260131_154854.mp4",
+    "local_path": "chunk_20260131_154854.mp4",
+    "timestamp": "2026-01-31T15:50:26.487527",
+    "analysis_snippet": "This video captures a quiet, focused study or work environment inside a modern, well-lit indoor space\u2014likely a library, co-working area, or classroom. The camera is positioned low on a wooden table in"
+  },
+  {
+    "id": "d23f091b-86ca-437b-9e5b-eda2d7eead4b",
+    "alert_id": "a2f94871-3525-42c1-a1db-440dd4dc64e3",
+    "alert_query": "alert me if you see anyone wearing red",
+    "video_url": "https://pub-12cca1351fa148f9a39e3866e22bef21.r2.dev/chunk_20260131_154455.mp4",
+    "local_path": "chunk_20260131_154455.mp4",
+    "timestamp": "2026-01-31T15:46:25.123915",
+    "analysis_snippet": "This video captures a quiet, focused scene inside a modern study or co-working space\u2014likely a library, learning center, or tech hub. The camera is positioned low on an empty wooden table in the foregr"
+  },
+  {
+    "id": "452823e0-ae2b-4274-96ae-91d8bb4ea920",
+    "alert_id": "855e13fc-5a7b-4b0c-b44e-8b08f144ef1b",
+    "alert_query": "alert me if you see anyone put their head on the table",
+    "video_url": "https://pub-12cca1351fa148f9a39e3866e22bef21.r2.dev/chunk_20260131_151905.mp4",
+    "local_path": "chunk_20260131_151905.mp4",
+    "timestamp": "2026-01-31T15:20:46.656686",
+    "analysis_snippet": "This video captures a quiet, focused scene in what appears to be a modern library, study hall, or co-working space. The camera is positioned low on a wooden table in the foreground, providing a stable"
+  }
+]

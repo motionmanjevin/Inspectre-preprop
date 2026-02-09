@@ -17,7 +17,15 @@ class Settings(BaseSettings):
     # Qwen API Settings
     QWEN_API_KEY: str
     QWEN_BASE_URL: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-    
+    # Qwen embedding (v3) and reranker for search relevance (replaces ChromaDB similarity)
+    QWEN_EMBEDDING_MODEL: str = "text-embedding-v3"
+    # For Singapore: qwen3-rerank. For Beijing: gte-rerank-v2
+    QWEN_RERANK_MODEL: str = "qwen3-rerank"
+    # Reranker: max docs per request (qwen3-rerank and gte-rerank-v2 support 500)
+    QWEN_RERANK_MAX_DOCS: int = 500
+    # Max chars per document for reranker (truncate; ~4k tokens ≈ 16k chars)
+    QWEN_RERANK_MAX_CHARS_PER_DOC: int = 16000
+
     # Cloudflare R2 Settings
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
@@ -40,14 +48,13 @@ class Settings(BaseSettings):
     # Search Settings
     DEFAULT_SEARCH_RESULTS: int = 5
     MAX_SEARCH_RESULTS: int = 25
-    # With cosine distance (lower is better). If distance is higher than this, we treat it as "not relevant".
-    # NOTE: cosine distance commonly falls in ~[0, 1] for most embeddings (sometimes up to 2 depending on backend).
-    # 0.50 can be too strict in practice and may filter out relevant matches.
-    CLIP_MAX_DISTANCE: float = 0.70
+    # Legacy: unused when using Qwen rerank for search.
+    CLIP_MAX_DISTANCE: float = 0.80
+    # Min relevance_score (0–1) from Qwen reranker to include in search results (higher = stricter)
+    CLIP_MIN_RELEVANCE_SCORE: float = 0.3
 
-    # Analysis Settings (stricter than clip search to avoid wasting credits)
-    # Only clips with distance <= this will be sent to Qwen Flash.
-    ANALYSIS_MAX_DISTANCE: float = 0.70
+    # Analysis Settings (when using Qwen rerank: min relevance_score 0–1 to send to VL Flash)
+    ANALYSIS_MIN_RELEVANCE_SCORE: float = 0.0
     
     # Authentication Settings
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
