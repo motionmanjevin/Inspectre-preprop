@@ -108,6 +108,7 @@ class QwenVLClient:
         query: str,
         documents: List[str],
         top_n: int,
+        instruction: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Rerank documents by relevance to query using Qwen reranker.
@@ -131,6 +132,8 @@ class QwenVLClient:
                 "documents": documents,
                 "top_n": min(top_n, len(documents)),
             }
+            if instruction:
+                payload["instruction"] = instruction
         else:
             # DashScope API endpoint (for gte-rerank-v2)
             rerank_base = self.base_url.replace("compatible-mode/v1", "api/v1")

@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from app.services.qwen_client import QwenVLClient
 import json
 from datetime import datetime, date, timedelta
+import re
 
 import chromadb
 from chromadb.config import Settings
@@ -25,6 +26,41 @@ logger = logging.getLogger(__name__)
 
 class ChromaStore:
     """Manages ChromaDB storage for video links and analysis results."""
+
+    _JSON_START_RE = re.compile(r"^\s*[\[{]")
+
+    @staticmethod
+    def _extract_text_from_json(value: Any, prefix: str = "") -> List[str]:
+        """Flatten JSON-like structures into a list of readable text lines."""
+        lines: List[str] = []
+        if isinstance(value, dict):
+            for key, item in value.items():
+                next_prefix = f"{prefix}.{key}" if prefix else str(key)
+                lines.extend(ChromaStore._extract_text_from_json(item, next_prefix))
+        elif isinstance(value, list):
+            for idx, item in enumerate(value):
+                next_prefix = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+                lines.extend(ChromaStore._extract_text_from_json(item, next_prefix))
+        elif isinstance(value, (str, int, float, bool)):
+            if prefix:
+                lines.append(f"{prefix}: {value}")
+            else:
+                lines.append(str(value))
+        return lines
+
+    @classmethod
+    def _normalize_document_text(cls, text: str) -> str:
+        """Convert JSON-looking text into flattened plain text for reranking."""
+        if not text:
+            return ""
+        if not cls._JSON_START_RE.match(text):
+            return text
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        lines = cls._extract_text_from_json(parsed)
+        return "\n".join(line for line in lines if line)
     
     def __init__(
         self,
@@ -90,6 +126,8 @@ class ChromaStore:
                     content = json.dumps(analysis_json)
             else:
                 content = str(analysis_json)
+
+            content_for_search = self._normalize_document_text(content)
             
             # Prepare metadata
             now = datetime.now()
@@ -108,7 +146,7 @@ class ChromaStore:
             
             # Add to collection
             self.collection.add(
-                documents=[content],
+                documents=[content_for_search],
                 metadatas=[doc_metadata],
                 ids=[doc_id]
             )
@@ -154,6 +192,18 @@ class ChromaStore:
                 {"timestamp_unix": {"$lte": end_timestamp}}
             ]
         }
+
+    @staticmethod
+    def _build_rerank_instruction(query: str, settings: Any) -> Optional[str]:
+        """Build an optional rerank instruction for Qwen reranker."""
+        base_instruction = getattr(settings, "QWEN_RERANK_INSTRUCT", "")
+        instruction = (base_instruction or "").strip()
+        if not instruction:
+            return None
+        try:
+            return instruction.format(query=query)
+        except (KeyError, ValueError):
+            return instruction
     
     def search_clips(
         self,
@@ -212,6 +262,7 @@ class ChromaStore:
                 if not text:
                     logger.warning(f"Clip {i} has empty document text")
                     continue
+                text = self._normalize_document_text(text)
                 if len(text) > max_chars:
                     text = text[:max_chars] + "..."
                 documents.append(text)
@@ -223,7 +274,13 @@ class ChromaStore:
 
             logger.info(f"Sending {len(documents)} documents to Qwen reranker (query: '{query[:50]}...')")
             # Rerank with Qwen (get more candidates than needed, then filter by score)
-            rerank_results = rerank_client.rerank_documents(query, documents, top_n=min(n_results * 2, len(documents)))
+            instruction = self._build_rerank_instruction(query, settings)
+            rerank_results = rerank_client.rerank_documents(
+                query,
+                documents,
+                top_n=min(n_results * 2, len(documents)),
+                instruction=instruction,
+            )
             logger.info(f"Reranker returned {len(rerank_results)} results")
             
             # Filter by minimum relevance score

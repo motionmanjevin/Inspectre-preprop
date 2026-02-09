@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     QWEN_RERANK_MAX_DOCS: int = 500
     # Max chars per document for reranker (truncate; ~4k tokens ≈ 16k chars)
     QWEN_RERANK_MAX_CHARS_PER_DOC: int = 16000
+    # Optional instruction to steer reranker behavior (format with {query} if desired)
+    QWEN_RERANK_INSTRUCT: str = (
+        "Rerank the clip analyses for relevance to the query: '{query}'. "
+        "Favor clips where the described action/event actually occurs. "
+        "Treat explicit negations (e.g., 'no one stood up') as NOT relevant to occurrence questions."
+    )
 
     # Cloudflare R2 Settings
     R2_ACCOUNT_ID: str = ""
