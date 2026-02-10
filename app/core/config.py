@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     # Legacy: unused when using Qwen rerank for search.
     CLIP_MAX_DISTANCE: float = 0.80
     # Min relevance_score (0–1) from Qwen reranker to include in search results (higher = stricter)
-    CLIP_MIN_RELEVANCE_SCORE: float = 0.3
+    CLIP_MIN_RELEVANCE_SCORE: float = 0.5
 
     # Analysis Settings (when using Qwen rerank: min relevance_score 0–1 to send to VL Flash)
     ANALYSIS_MIN_RELEVANCE_SCORE: float = 0.0
