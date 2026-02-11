@@ -1,6 +1,7 @@
-import { X, Settings, Home, RefreshCw, Archive, LogOut } from "lucide-react";
+import { X, Settings, Home, RefreshCw, Archive, LogOut, Smartphone } from "lucide-react";
 import { useState, useEffect } from "react";
-import { searchApi, recordingApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
+import { searchApi, recordingApi, tunnelApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
+import { QRCodeSVG } from "qrcode.react";
 
 export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }: { 
   isOpen: boolean; 
@@ -11,6 +12,8 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
 }) {
   const [stats, setStats] = useState<ProcessingStatsResponse | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<RecordingStatus | null>(null);
+  const [showQRCode, setShowQRCode] = useState(false);
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
 
   // Fetch processing stats on mount and periodically
   useEffect(() => {
@@ -38,6 +41,23 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
       // Silently fail - backend might not be running / user not authed yet
       console.debug("Failed to fetch recording status:", error);
     }
+  };
+
+  const fetchTunnelUrl = async () => {
+    try {
+      const response = await tunnelApi.getUrl();
+      setTunnelUrl(response.tunnel_url);
+    } catch (error) {
+      console.debug("Failed to fetch tunnel URL:", error);
+      setTunnelUrl(null);
+    }
+  };
+
+  const handleConnectMobile = async () => {
+    if (!tunnelUrl) {
+      await fetchTunnelUrl();
+    }
+    setShowQRCode(true);
   };
 
   // Format minutes to hours:minutes display
@@ -147,11 +167,12 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
         <div className="p-6 border-t border-[#1a1a1a] space-y-4">
           <div className="space-y-4">
             {/* Navigation Buttons */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {/* Home Button */}
               <button 
                 onClick={() => onNavigate("chat")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors"
+                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
+                title="Home"
               >
                 <Home className="w-5 h-5 text-gray-400" />
               </button>
@@ -159,7 +180,7 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
               {/* Archives Button */}
               <button 
                 onClick={() => onNavigate("archives")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors"
+                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
                 title="View archived conversations"
               >
                 <Archive className="w-5 h-5 text-gray-400" />
@@ -168,16 +189,26 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
               {/* Refresh Chat Button */}
               <button 
                 onClick={onRefreshChat}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors group"
+                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors group min-w-[60px]"
                 title="Clear chat messages"
               >
                 <RefreshCw className="w-5 h-5 text-gray-400 group-hover:rotate-180 transition-transform duration-500" />
               </button>
               
+              {/* Connect to Mobile Button */}
+              <button 
+                onClick={handleConnectMobile}
+                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
+                title="Connect to Mobile"
+              >
+                <Smartphone className="w-5 h-5 text-gray-400" />
+              </button>
+              
               {/* Settings Button */}
               <button 
                 onClick={() => onNavigate("settings")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors"
+                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
+                title="Settings"
               >
                 <Settings className="w-5 h-5 text-gray-400" />
               </button>
@@ -217,6 +248,59 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
           </div>
         </div>
       </aside>
+
+      {/* QR Code Modal */}
+      {showQRCode && (
+        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white">Connect to Mobile</h2>
+              <button
+                onClick={() => setShowQRCode(false)}
+                className="p-2 hover:bg-[#1a1a1a] rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+            
+            {tunnelUrl ? (
+              <>
+                <div className="flex justify-center mb-4 p-4 bg-white rounded-lg">
+                  <QRCodeSVG value={tunnelUrl} size={256} />
+                </div>
+                <p className="text-sm text-gray-400 text-center mb-2">
+                  Scan this QR code with your mobile app to connect
+                </p>
+                <div className="bg-[#1a1a1a] rounded-lg p-3 mb-4">
+                  <p className="text-xs text-gray-500 mb-1">Tunnel URL:</p>
+                  <p className="text-sm text-gray-300 break-all font-mono">{tunnelUrl}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(tunnelUrl);
+                  }}
+                  className="w-full py-2 px-4 bg-[#1a1a1a] hover:bg-[#252525] rounded-lg text-sm text-gray-300 transition-colors"
+                >
+                  Copy URL
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-400 mb-4">Tunnel not available</p>
+                <p className="text-sm text-gray-500">
+                  Make sure Cloudflare Tunnel is installed and running
+                </p>
+                <button
+                  onClick={fetchTunnelUrl}
+                  className="mt-4 py-2 px-4 bg-[#1a1a1a] hover:bg-[#252525] rounded-lg text-sm text-gray-300 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }

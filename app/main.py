@@ -14,7 +14,8 @@ from app.services.r2_uploader import R2Uploader
 from app.services.qwen_client import QwenVLClient
 from app.services.chroma_store import ChromaStore
 from app.services.alert_service import AlertService
-from app.utils.exceptions import R2UploadError, QwenAPIError, ChromaDBError
+from app.services.tunnel_manager import TunnelManager
+from app.utils.exceptions import R2UploadError, QwenAPIError, ChromaDBError, VideoRecordingError
 
 # Setup logging
 setup_logging()
@@ -40,7 +41,7 @@ app.add_middleware(
 )
 
 # Include routers (import recording after chunk_callback is defined)
-from app.api.routes import recording, videos, alerts, auth
+from app.api.routes import recording, videos, alerts, auth, tunnel
 
 app.include_router(health.router)  # Public endpoint
 app.include_router(auth.router)  # Public endpoints (register/login)
@@ -49,12 +50,14 @@ app.include_router(search.router)
 app.include_router(analysis.router)
 app.include_router(videos.router)
 app.include_router(alerts.router)
+app.include_router(tunnel.router)
 
 # Initialize services (singleton pattern)
 _qwen_client: Optional[QwenVLClient] = None
 _r2_uploader: Optional[R2Uploader] = None
 _chroma_store: Optional[ChromaStore] = None
 _alert_service: Optional[AlertService] = None
+_tunnel_manager: Optional[TunnelManager] = None
 
 
 def get_qwen_client() -> QwenVLClient:
@@ -103,6 +106,18 @@ def get_alert_service() -> AlertService:
     if _alert_service is None:
         _alert_service = AlertService()
     return _alert_service
+
+
+def get_tunnel_manager() -> TunnelManager:
+    """Get or create TunnelManager instance."""
+    global _tunnel_manager
+    if _tunnel_manager is None:
+        _tunnel_manager = TunnelManager(local_url="http://localhost:8000")
+    return _tunnel_manager
+
+
+# Set tunnel manager getter (after get_tunnel_manager is defined)
+tunnel.set_tunnel_manager_getter(get_tunnel_manager)
 
 
 def chunk_callback(chunk_path: str) -> None:
@@ -216,6 +231,17 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"R2 uploader not available: {str(e)}")
     
+    # Start Cloudflare tunnel for mobile access
+    try:
+        tunnel_manager = get_tunnel_manager()
+        tunnel_url = tunnel_manager.start_tunnel()
+        logger.info(f"Cloudflare tunnel started: {tunnel_url}")
+    except VideoRecordingError as e:
+        logger.warning(f"Cloudflare tunnel not available: {str(e)}")
+        logger.warning("Mobile app pairing will not be available. Install cloudflared to enable.")
+    except Exception as e:
+        logger.warning(f"Failed to start tunnel: {str(e)}")
+    
     logger.info("Application startup complete")
 
 
@@ -223,6 +249,10 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info("Shutting down application")
+    # Stop tunnel
+    global _tunnel_manager
+    if _tunnel_manager is not None:
+        _tunnel_manager.stop_tunnel()
 
 
 if __name__ == "__main__":

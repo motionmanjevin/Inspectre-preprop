@@ -3,10 +3,68 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// TODO: Update this to your Cloudflare Tunnel URL when deployed
-export const API_BASE_URL = 'https://belfast-boundary-countries-strip.trycloudflare.com'; // Change to your Cloudflare Tunnel URL
-
+const TUNNEL_URL_KEY = 'tunnel_url';
 const AUTH_TOKEN_KEY = 'auth_token';
+
+// Default fallback (will be overridden by saved tunnel URL)
+let API_BASE_URL = 'http://localhost:8000';
+
+/**
+ * Get stored tunnel URL
+ */
+export const getTunnelUrl = async () => {
+  try {
+    return await AsyncStorage.getItem(TUNNEL_URL_KEY);
+  } catch (error) {
+    console.error('Error getting tunnel URL:', error);
+    return null;
+  }
+};
+
+/**
+ * Set tunnel URL and update API_BASE_URL
+ */
+export const setTunnelUrl = async (url) => {
+  try {
+    await AsyncStorage.setItem(TUNNEL_URL_KEY, url);
+    API_BASE_URL = url;
+    return url;
+  } catch (error) {
+    console.error('Error storing tunnel URL:', error);
+    return null;
+  }
+};
+
+/**
+ * Remove tunnel URL
+ */
+export const removeTunnelUrl = async () => {
+  try {
+    await AsyncStorage.removeItem(TUNNEL_URL_KEY);
+    API_BASE_URL = 'http://localhost:8000';
+  } catch (error) {
+    console.error('Error removing tunnel URL:', error);
+  }
+};
+
+/**
+ * Initialize API_BASE_URL from storage
+ */
+export const initializeApiBaseUrl = async () => {
+  const savedUrl = await getTunnelUrl();
+  if (savedUrl) {
+    API_BASE_URL = savedUrl;
+  }
+  return API_BASE_URL;
+};
+
+/**
+ * Get current API base URL
+ */
+export const getApiBaseUrl = () => API_BASE_URL;
+
+// Export API_BASE_URL getter (for backward compatibility)
+export { API_BASE_URL };
 
 /**
  * Get stored auth token
@@ -46,7 +104,9 @@ export const removeAuthToken = async () => {
  * Make API request with authentication
  */
 async function apiRequest(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  // Ensure API_BASE_URL is initialized
+  const baseUrl = await initializeApiBaseUrl();
+  const url = `${baseUrl}${endpoint}`;
   const token = await getAuthToken();
   
   const headers = {

@@ -13,6 +13,7 @@ import {
   Animated,
   Modal,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,7 +21,16 @@ import { Video, ResizeMode } from 'expo-av';
 import EyeIcon from './components/EyeIcon';
 import SplashScreen from './components/SplashScreen';
 import LoginScreen from './components/LoginScreen';
-import { searchApi, analysisApi, getAuthToken, API_BASE_URL } from './utils/api';
+import QRScanner from './components/QRScanner';
+import { 
+  searchApi, 
+  analysisApi, 
+  getAuthToken, 
+  getTunnelUrl, 
+  setTunnelUrl, 
+  initializeApiBaseUrl,
+  API_BASE_URL 
+} from './utils/api';
 
 const { width, height } = Dimensions.get('window');
 
@@ -132,32 +142,103 @@ const VideoCard = ({ children, onPress }) => {
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showSplash, setShowSplash] = useState(false);
+  const [showSplash, setShowSplash] = useState(true); // Always start with splash
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [isCheckingTunnel, setIsCheckingTunnel] = useState(false);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [showVideoOverlay, setShowVideoOverlay] = useState(false);
 
-  // Check if user is already logged in
-  React.useEffect(() => {
-    const checkAuth = async () => {
-      const token = await getAuthToken();
-      if (token) {
-        setIsLoggedIn(true);
-        setShowSplash(true);
+  // Initialize tunnel URL and check auth after splash finishes
+  const handleSplashFinish = async () => {
+    setShowSplash(false);
+    
+    // Initialize API base URL from storage
+    await initializeApiBaseUrl();
+    
+    // Check if tunnel URL exists
+    const tunnelUrl = await getTunnelUrl();
+    if (!tunnelUrl) {
+      // No tunnel URL saved, show QR scanner
+      setShowQRScanner(true);
+      return;
+    }
+    
+    // Test connection to saved tunnel URL
+    try {
+      const testUrl = `${tunnelUrl}/health`;
+      const response = await fetch(testUrl, {
+        method: 'GET',
+      });
+      
+      if (response.ok) {
+        // Connection successful, check if logged in
+        const token = await getAuthToken();
+        if (token) {
+          setIsLoggedIn(true);
+        }
+        // If not logged in, will show login screen
+      } else {
+        // Connection failed, ask to rescan
+        setShowQRScanner(true);
       }
-    };
-    checkAuth();
-  }, []);
-
-  const handleLogin = () => {
-    setIsLoggedIn(true);
-    setShowSplash(true);
+    } catch (error) {
+      // Connection failed, ask to rescan
+      console.log('Tunnel connection test failed:', error);
+      setShowQRScanner(true);
+    }
   };
 
-  const handleSplashFinish = () => {
-    setShowSplash(false);
+  const handleLogin = async () => {
+    setIsLoggedIn(true);
+  };
+
+  const handleQRScan = async (tunnelUrl) => {
+    try {
+      // Save tunnel URL
+      await setTunnelUrl(tunnelUrl);
+      
+      // Test connection
+      const testUrl = `${tunnelUrl}/health`;
+      const response = await fetch(testUrl, {
+        method: 'GET',
+      });
+      
+      if (response.ok) {
+        // Connection successful, close scanner
+        setShowQRScanner(false);
+        
+        // Check if user is already logged in
+        const token = await getAuthToken();
+        if (token) {
+          setIsLoggedIn(true);
+        }
+        // If not logged in, will show login screen
+      } else {
+        Alert.alert(
+          'Connection Failed',
+          'Could not connect to the tunnel. Please check the QR code and try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        'Connection Failed',
+        `Could not connect to the tunnel: ${error.message || 'Unknown error'}. Please check the QR code and try again.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleQRCancel = () => {
+    // Can't cancel - tunnel URL is required
+    Alert.alert(
+      'Tunnel Required',
+      'You must scan a QR code to connect to your device.',
+      [{ text: 'OK', onPress: () => setShowQRScanner(true) }]
+    );
   };
 
   const handleVideoPress = (videoData) => {
@@ -320,12 +401,19 @@ export default function App() {
     }
   };
 
-  if (!isLoggedIn) {
-    return <LoginScreen onLogin={handleLogin} />;
-  }
-
+  // Always show splash screen first
   if (showSplash) {
     return <SplashScreen onFinish={handleSplashFinish} />;
+  }
+
+  // After splash, show QR scanner if tunnel URL is missing
+  if (showQRScanner) {
+    return <QRScanner onScan={handleQRScan} onCancel={handleQRCancel} />;
+  }
+
+  // If not logged in, show login screen
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   const isFirstTime = messages.length === 0;

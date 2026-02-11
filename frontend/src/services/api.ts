@@ -314,6 +314,22 @@ export const alertsApi = {
 };
 
 /**
+ * Tunnel API
+ */
+export interface TunnelUrlResponse {
+  tunnel_url: string | null;
+}
+
+export const tunnelApi = {
+  /**
+   * Get Cloudflare tunnel URL for mobile pairing
+   */
+  async getUrl(): Promise<TunnelUrlResponse> {
+    return apiRequest<TunnelUrlResponse>('/tunnel/url');
+  },
+};
+
+/**
  * Auth API
  */
 export interface User {
@@ -378,4 +394,5 @@ export default {
   health: healthApi,
   alerts: alertsApi,
   auth: authApi,
+  tunnel: tunnelApi,
 };

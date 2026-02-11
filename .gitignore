@@ -61,6 +61,7 @@ htmlcov/
 # Project specific
 nn.mp4
 subwork.py
+users.db
 
 # Electron
 frontend/dist-electron/
