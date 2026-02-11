@@ -1,5 +1,6 @@
 import { X, Settings, Home, RefreshCw, Archive, LogOut, Smartphone } from "lucide-react";
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { searchApi, recordingApi, tunnelApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -160,6 +161,23 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
           )}
         </div>
 
+        {/* Connect to Mobile - main section */}
+        <div className="p-4 border-b border-[#1a1a1a]">
+          <button
+            onClick={handleConnectMobile}
+            className="w-full flex items-center gap-3 p-4 hover:bg-[#1a1a1a] rounded-lg transition-colors border border-[#1a1a1a] hover:border-[#2a2a2a]"
+            title="Connect to Mobile"
+          >
+            <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[#1a1a1a]">
+              <Smartphone className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-white block">Connect to Mobile</span>
+              <span className="text-xs text-gray-500">Scan QR code to pair device</span>
+            </div>
+          </button>
+        </div>
+
         {/* Spacer */}
         <div className="flex-1" />
 
@@ -193,15 +211,6 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
                 title="Clear chat messages"
               >
                 <RefreshCw className="w-5 h-5 text-gray-400 group-hover:rotate-180 transition-transform duration-500" />
-              </button>
-              
-              {/* Connect to Mobile Button */}
-              <button 
-                onClick={handleConnectMobile}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
-                title="Connect to Mobile"
-              >
-                <Smartphone className="w-5 h-5 text-gray-400" />
               </button>
               
               {/* Settings Button */}
@@ -249,10 +258,22 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
         </div>
       </aside>
 
-      {/* QR Code Modal */}
-      {showQRCode && (
-        <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
-          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-lg p-6 max-w-md w-full">
+      {/* QR Code Modal - rendered in portal so it always appears on top */}
+      {showQRCode && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{
+            zIndex: 2147483647,
+            backgroundColor: "rgba(0, 0, 0, 0.88)",
+            backdropFilter: "blur(6px)",
+          }}
+          onClick={(e) => e.target === e.currentTarget && setShowQRCode(false)}
+        >
+          <div
+            className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-xl p-6 max-w-md w-full"
+            style={{ boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-white">Connect to Mobile</h2>
               <button
@@ -262,7 +283,7 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
                 <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
-            
+
             {tunnelUrl ? (
               <>
                 <div className="flex justify-center mb-4 p-4 bg-white rounded-lg">
@@ -299,7 +320,8 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
