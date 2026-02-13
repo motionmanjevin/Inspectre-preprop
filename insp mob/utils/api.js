@@ -260,3 +260,70 @@ export const analysisApi = {
     });
   },
 };
+
+/**
+ * Search API - additional methods
+ */
+export const searchApiExtended = {
+  /**
+   * Get available dates for filtering
+   */
+  async getAvailableDates() {
+    return apiRequest('/search/available-dates');
+  },
+
+  /**
+   * Get processing stats
+   */
+  async getProcessingStats() {
+    return apiRequest('/search/stats');
+  },
+};
+
+/**
+ * Alerts API
+ */
+export const alertsApi = {
+  /**
+   * List all alerts
+   */
+  async list() {
+    return apiRequest('/alerts');
+  },
+
+  /**
+   * Create a new alert
+   */
+  async create(query) {
+    return apiRequest('/alerts', {
+      method: 'POST',
+      body: JSON.stringify({ query, enabled: true }),
+    });
+  },
+
+  /**
+   * Update an alert
+   */
+  async update(alertId, payload) {
+    return apiRequest(`/alerts/${alertId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Delete an alert
+   */
+  async remove(alertId) {
+    return apiRequest(`/alerts/${alertId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  /**
+   * Get alert history
+   */
+  async history(limit = 100) {
+    return apiRequest(`/alerts/history?limit=${encodeURIComponent(String(limit))}`);
+  },
+};

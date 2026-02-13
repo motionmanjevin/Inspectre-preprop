@@ -37,6 +37,7 @@ import MenuDrawer from './components/MenuDrawer';
 import AlertsPage from './components/AlertsPage';
 import ChatHistoryPage from './components/ChatHistoryPage';
 import ProcessingTimelinePage from './components/ProcessingTimelinePage';
+import DateFilterModal from './components/DateFilterModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
@@ -305,6 +306,8 @@ export default function App() {
   const [timeFilter, setTimeFilter] = useState('Last 24 hours');
   const [selectedDate, setSelectedDate] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [loadingDates, setLoadingDates] = useState(false);
 
   // Initialize tunnel URL and check auth after splash finishes
   const handleSplashFinish = async () => {
@@ -435,11 +438,15 @@ export default function App() {
 
   // Fetch available dates
   const fetchAvailableDates = async () => {
+    setLoadingDates(true);
     try {
       const response = await searchApiExtended.getAvailableDates();
       setAvailableDates(response.dates || []);
     } catch (error) {
       console.error('Error fetching available dates:', error);
+      setAvailableDates([]);
+    } finally {
+      setLoadingDates(false);
     }
   };
 
@@ -610,6 +617,13 @@ export default function App() {
       saveChatHistory();
     }
   };
+
+  // Load available dates when logged in and on chat page
+  useEffect(() => {
+    if (isLoggedIn && currentPage === 'chat') {
+      fetchAvailableDates();
+    }
+  }, [isLoggedIn, currentPage]);
 
   const renderMessage = (msg, index) => {
     switch (msg.type) {
@@ -791,37 +805,9 @@ export default function App() {
           {currentPage === 'chat' && (
             <TouchableOpacity
               onPress={async () => {
-                // Ensure dates are loaded
-                if (availableDates.length === 0) {
-                  await fetchAvailableDates();
-                }
-                
-                // Show time filter options
-                const options = [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Last 24 hours',
-                    onPress: () => {
-                      setTimeFilter('Last 24 hours');
-                      setSelectedDate(null);
-                    },
-                  },
-                ];
-                
-                // Add available dates
-                if (availableDates.length > 0) {
-                  availableDates.slice(0, 10).forEach((date) => {
-                    options.push({
-                      text: date,
-                      onPress: () => {
-                        setTimeFilter(date);
-                        setSelectedDate(date);
-                      },
-                    });
-                  });
-                }
-                
-                Alert.alert('Time Filter', 'Select time range', options);
+                // Always refresh dates when opening the modal
+                await fetchAvailableDates();
+                setShowDateFilter(true);
               }}
               style={styles.filterButton}
             >
@@ -911,6 +897,20 @@ export default function App() {
           onClose={() => setShowMenuDrawer(false)}
           onNavigate={handleNavigate}
           currentPage={currentPage}
+        />
+      )}
+
+      {/* Date Filter Modal */}
+      {currentPage === 'chat' && (
+        <DateFilterModal
+          visible={showDateFilter}
+          onClose={() => setShowDateFilter(false)}
+          onSelectDate={(filterText, date) => {
+            setTimeFilter(filterText);
+            setSelectedDate(date);
+          }}
+          availableDates={availableDates}
+          loading={loadingDates}
         />
       )}
 
