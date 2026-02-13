@@ -25,6 +25,7 @@ import QRScanner from './components/QRScanner';
 import { 
   searchApi, 
   analysisApi, 
+  searchApiExtended,
   getAuthToken, 
   getTunnelUrl, 
   setTunnelUrl, 
@@ -32,6 +33,11 @@ import {
   initializeApiBaseUrl,
   API_BASE_URL 
 } from './utils/api';
+import MenuDrawer from './components/MenuDrawer';
+import AlertsPage from './components/AlertsPage';
+import ChatHistoryPage from './components/ChatHistoryPage';
+import ProcessingTimelinePage from './components/ProcessingTimelinePage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -282,6 +288,8 @@ const VideoCard = ({ children, onPress }) => {
   );
 };
 
+const CHAT_HISTORY_KEY = 'inspectre_chat_history';
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showSplash, setShowSplash] = useState(true); // Always start with splash
@@ -292,6 +300,11 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [showVideoOverlay, setShowVideoOverlay] = useState(false);
+  const [showMenuDrawer, setShowMenuDrawer] = useState(false);
+  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'alerts', 'history', 'timeline'
+  const [timeFilter, setTimeFilter] = useState('Last 24 hours');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [availableDates, setAvailableDates] = useState([]);
 
   // Initialize tunnel URL and check auth after splash finishes
   const handleSplashFinish = async () => {
@@ -395,6 +408,49 @@ export default function App() {
     // Keep selectedVideo intact to avoid re-renders
   };
 
+  // Save chat history
+  const saveChatHistory = async () => {
+    if (messages.length === 0) return;
+    try {
+      const stored = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
+      const conversations = stored ? JSON.parse(stored) : [];
+      const newConversation = {
+        id: Date.now().toString(),
+        date: new Date().toISOString(),
+        messages: messages,
+      };
+      conversations.push(newConversation);
+      // Keep only last 50 conversations
+      const trimmed = conversations.slice(-50);
+      await AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(trimmed));
+    } catch (error) {
+      console.error('Error saving chat history:', error);
+    }
+  };
+
+  // Restore conversation from history
+  const restoreConversation = (restoredMessages) => {
+    setMessages(restoredMessages);
+  };
+
+  // Fetch available dates
+  const fetchAvailableDates = async () => {
+    try {
+      const response = await searchApiExtended.getAvailableDates();
+      setAvailableDates(response.dates || []);
+    } catch (error) {
+      console.error('Error fetching available dates:', error);
+    }
+  };
+
+  // Get target date for API calls
+  const getTargetDate = () => {
+    if (timeFilter === 'Last 24 hours' || !selectedDate) {
+      return null;
+    }
+    return selectedDate;
+  };
+
   const handleSearch = async () => {
     if (!message.trim()) return;
     
@@ -407,7 +463,8 @@ export default function App() {
 
     try {
       const token = await getAuthToken();
-      const response = await searchApi.searchClips(queryText, 5);
+      const targetDate = getTargetDate();
+      const response = await searchApi.searchClips(queryText, 5, targetDate);
       
       // Convert API response to message format
       if (response.clips && response.clips.length > 0) {
@@ -471,7 +528,8 @@ export default function App() {
 
     try {
       const token = await getAuthToken();
-      const response = await analysisApi.analyze(queryText, 5);
+      const targetDate = getTargetDate();
+      const response = await analysisApi.analyze(queryText, 5, targetDate);
       
       // Process each analysis result - show video card + analysis text
       if (response.results && response.results.length > 0) {
@@ -539,6 +597,17 @@ export default function App() {
       }]);
     } finally {
       setIsLoading(false);
+      // Save chat history after each query
+      saveChatHistory();
+    }
+  };
+
+  // Handle navigation
+  const handleNavigate = (page) => {
+    setCurrentPage(page);
+    if (page === 'chat') {
+      // Save current conversation before switching
+      saveChatHistory();
     }
   };
 
@@ -607,6 +676,71 @@ export default function App() {
 
   const isFirstTime = messages.length === 0;
 
+  // Render non-chat pages fullscreen (outside KeyboardAvoidingView)
+  if (currentPage === 'alerts') {
+    return (
+      <>
+        <AlertsPage
+          onBack={() => {
+            setCurrentPage('chat');
+            saveChatHistory();
+          }}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentPage === 'history') {
+    return (
+      <>
+        <ChatHistoryPage
+          onBack={() => {
+            setCurrentPage('chat');
+            saveChatHistory();
+          }}
+          onRestoreConversation={restoreConversation}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentPage === 'timeline') {
+    return (
+      <>
+        <ProcessingTimelinePage
+          onBack={() => {
+            setCurrentPage('chat');
+            saveChatHistory();
+          }}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
@@ -642,36 +776,90 @@ export default function App() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Inspectre</Text>
-        </View>
-
-        <View style={styles.content}>
-          {isFirstTime ? (
-            <View style={styles.welcomeContainer}>
-              <EyeIcon />
-              <Text style={styles.welcomeText}>What are we looking for?</Text>
-            </View>
-          ) : (
-            <ScrollView 
-              style={styles.messagesContainer}
-              contentContainerStyle={styles.messagesContent}
-              showsVerticalScrollIndicator={false}
+          <TouchableOpacity
+            onPress={() => setShowMenuDrawer(true)}
+            style={styles.menuButton}
+          >
+            <Ionicons name="menu" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Inspectre</Text>
+            {currentPage === 'chat' && timeFilter && (
+              <Text style={styles.timeFilterText}>{timeFilter}</Text>
+            )}
+          </View>
+          {currentPage === 'chat' && (
+            <TouchableOpacity
+              onPress={async () => {
+                // Ensure dates are loaded
+                if (availableDates.length === 0) {
+                  await fetchAvailableDates();
+                }
+                
+                // Show time filter options
+                const options = [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Last 24 hours',
+                    onPress: () => {
+                      setTimeFilter('Last 24 hours');
+                      setSelectedDate(null);
+                    },
+                  },
+                ];
+                
+                // Add available dates
+                if (availableDates.length > 0) {
+                  availableDates.slice(0, 10).forEach((date) => {
+                    options.push({
+                      text: date,
+                      onPress: () => {
+                        setTimeFilter(date);
+                        setSelectedDate(date);
+                      },
+                    });
+                  });
+                }
+                
+                Alert.alert('Time Filter', 'Select time range', options);
+              }}
+              style={styles.filterButton}
             >
-              {messages.map((msg, index) => renderMessage(msg, index))}
-              {isLoading && (
-                <View style={styles.loadingContainer}>
-                  <View style={styles.loadingDots}>
-                    <View style={[styles.dot, styles.dot1]} />
-                    <View style={[styles.dot, styles.dot2]} />
-                    <View style={[styles.dot, styles.dot3]} />
-                  </View>
-                </View>
-              )}
-            </ScrollView>
+              <Ionicons name="calendar-outline" size={20} color="#00ff88" />
+            </TouchableOpacity>
           )}
+          {currentPage !== 'chat' && <View style={styles.menuButton} />}
         </View>
 
-        <View style={styles.inputContainer}>
+        {currentPage === 'chat' && (
+          <>
+            <View style={styles.content}>
+              {isFirstTime ? (
+                <View style={styles.welcomeContainer}>
+                  <EyeIcon />
+                  <Text style={styles.welcomeText}>What are we looking for?</Text>
+                </View>
+              ) : (
+                <ScrollView 
+                  style={styles.messagesContainer}
+                  contentContainerStyle={styles.messagesContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {messages.map((msg, index) => renderMessage(msg, index))}
+                  {isLoading && (
+                    <View style={styles.loadingContainer}>
+                      <View style={styles.loadingDots}>
+                        <View style={[styles.dot, styles.dot1]} />
+                        <View style={[styles.dot, styles.dot2]} />
+                        <View style={[styles.dot, styles.dot3]} />
+                      </View>
+                    </View>
+                  )}
+                </ScrollView>
+              )}
+            </View>
+
+            <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
             <LinearGradient
               colors={['rgba(150, 150, 200, 0.15)', 'rgba(100, 100, 150, 0.08)', 'rgba(50, 50, 100, 0.05)']}
@@ -706,6 +894,8 @@ export default function App() {
             </View>
           </View>
         </View>
+          </>
+        )}
       </KeyboardAvoidingView>
       
       <VideoOverlay
@@ -713,6 +903,17 @@ export default function App() {
         onClose={closeVideoOverlay}
         videoData={selectedVideo}
       />
+
+      {/* Menu Drawer */}
+      {isLoggedIn && (
+        <MenuDrawer
+          visible={showMenuDrawer}
+          onClose={() => setShowMenuDrawer(false)}
+          onNavigate={handleNavigate}
+          currentPage={currentPage}
+        />
+      )}
+
     </SafeAreaView>
   );
 }
@@ -753,15 +954,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: 32,
-    paddingVertical: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: '400',
-    color: '#e8e8e8',
-    textAlign: 'center',
-    letterSpacing: 0.5,
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 2,
+  },
+  timeFilterText: {
+    fontSize: 11,
+    color: '#00ff88',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  filterButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,
