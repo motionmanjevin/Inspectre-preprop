@@ -139,13 +139,22 @@ export const recordingApi = {
    * Start recording from an RTSP stream
    * @param rtspUrl RTSP stream URL to record
    * @param chunkDuration Duration of each video chunk in minutes (1-60). Optional.
+   * @param motionDetectionEnabled Enable motion detection (only record when motion detected)
+   * @param motionThreshold Motion detection threshold (0.0-1.0)
    */
-  async start(rtspUrl: string, chunkDuration?: number): Promise<{ status: string; rtsp_url: string }> {
+  async start(
+    rtspUrl: string, 
+    chunkDuration?: number,
+    motionDetectionEnabled?: boolean,
+    motionThreshold?: number
+  ): Promise<{ status: string; rtsp_url: string }> {
     return apiRequest('/recording/start', {
       method: 'POST',
       body: JSON.stringify({ 
         rtsp_url: rtspUrl,
         chunk_duration: chunkDuration || null,
+        motion_detection_enabled: motionDetectionEnabled || false,
+        motion_threshold: motionThreshold || 0.3,
       }),
     });
   },

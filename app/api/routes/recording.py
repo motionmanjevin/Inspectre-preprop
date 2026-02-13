@@ -64,7 +64,9 @@ async def start_recording(
         _video_recorder = VideoRecorder(
             rtsp_url=request.rtsp_url,
             output_dir=settings.RECORDINGS_DIR,
-            chunk_duration=chunk_duration_seconds
+            chunk_duration=chunk_duration_seconds,
+            motion_detection_enabled=request.motion_detection_enabled or False,
+            motion_threshold=request.motion_threshold or 0.3
         )
         
         # Get callback from main module

@@ -25,7 +25,9 @@ class VideoRecorder:
         self,
         rtsp_url: str,
         output_dir: Optional[str] = None,
-        chunk_duration: Optional[int] = None
+        chunk_duration: Optional[int] = None,
+        motion_detection_enabled: bool = False,
+        motion_threshold: float = 0.3
     ):
         """
         Initialize video recorder.
@@ -34,23 +36,36 @@ class VideoRecorder:
             rtsp_url: RTSP stream URL
             output_dir: Directory to save video chunks
             chunk_duration: Duration of each chunk in seconds
+            motion_detection_enabled: Enable motion detection (only record when motion detected)
+            motion_threshold: Motion detection threshold (0.0-1.0)
         """
         settings = get_settings()
         self.rtsp_url = rtsp_url
         self.output_dir = Path(output_dir or settings.RECORDINGS_DIR)
         self.chunk_duration = chunk_duration or settings.VIDEO_CHUNK_DURATION
+        self.motion_detection_enabled = motion_detection_enabled
+        self.motion_threshold = motion_threshold
         self.is_recording = False
         self.current_ffmpeg_process: Optional[subprocess.Popen] = None
         self.current_writer: Optional[cv2.VideoWriter] = None
         self.cap: Optional[cv2.VideoCapture] = None
         self.recording_thread: Optional[threading.Thread] = None
         self.segment_monitor_thread: Optional[threading.Thread] = None
+        self.motion_detection_thread: Optional[threading.Thread] = None
         self.callback: Optional[Callable[[str], None]] = None
         self.use_ffmpeg = True  # legacy flag, kept for compatibility
         self._ffmpeg_option_cache: Dict[str, bool] = {}
         self._stop_event = threading.Event()
         self._seen_segments: Set[str] = set()
         self._segment_last_sizes: Dict[str, int] = {}
+        
+        # Motion detection state
+        self._motion_detected = False
+        self._motion_lock = threading.Lock()
+        self._background_subtractor: Optional[cv2.BackgroundSubtractor] = None
+        self._ffmpeg_recording_active = False
+        self._motion_cap: Optional[cv2.VideoCapture] = None
+        self._check_motion_after_chunk = False  # Flag to check motion after chunk completes
 
         # Helpful validation/logging for common RTSP mistakes
         try:
@@ -252,8 +267,14 @@ class VideoRecorder:
             self.current_ffmpeg_process = None
 
         # If we didn't request stop and ffmpeg exited for any reason, treat as failure.
-        # Otherwise the API will keep reporting recording=True even though nothing is happening.
-        if not self._stop_event.is_set():
+        # However, in motion detection mode, FFmpeg may be stopped intentionally when motion stops.
+        if not self._stop_event.is_set() and self.is_recording:
+            # Check if this is motion detection mode and recording was intentionally stopped
+            if self.motion_detection_enabled and not self._ffmpeg_recording_active:
+                # This is expected - motion stopped, recording was intentionally stopped
+                logger.debug("FFmpeg stopped (motion detection: motion stopped)")
+                return
+            
             tail = list(stderr_tail)
             raise VideoRecordingError(
                 "FFmpeg exited unexpectedly while recording. "
@@ -305,6 +326,21 @@ class VideoRecorder:
                                 self.callback(fp)
                             except Exception as e:
                                 logger.error(f"Error in chunk callback: {e}")
+                        
+                        # In motion detection mode, check motion after chunk completes
+                        if self.motion_detection_enabled:
+                            logger.info("Chunk completed, checking motion before next chunk")
+                            has_motion = self._check_motion()
+                            
+                            with self._motion_lock:
+                                if not has_motion:
+                                    # No motion detected, stop FFmpeg recording
+                                    logger.info("No motion detected after chunk completion, stopping recording")
+                                    self._motion_detected = False
+                                    self._stop_ffmpeg_recording()
+                                else:
+                                    # Motion still detected, FFmpeg will continue to next chunk
+                                    logger.info("Motion still detected, continuing to next chunk")
 
                 time.sleep(poll_interval)
             except Exception as e:
@@ -462,6 +498,159 @@ class VideoRecorder:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return str(self.output_dir / f"chunk_{timestamp}.mp4")
     
+    def _check_motion(self) -> bool:
+        """
+        Check if motion is currently detected in the video stream.
+        Checks multiple frames for more reliable detection.
+        
+        Returns:
+            True if motion detected, False otherwise
+        """
+        if not self._motion_cap or not self._motion_cap.isOpened():
+            return False
+        
+        try:
+            # Check a few frames to get more reliable motion detection
+            motion_detections = []
+            for _ in range(3):  # Check 3 frames
+                ret, frame = self._motion_cap.read()
+                if not ret:
+                    continue
+                
+                # Resize frame for faster processing
+                small_frame = cv2.resize(frame, (320, 240))
+                gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+                
+                # Apply background subtraction
+                fg_mask = self._background_subtractor.apply(gray)
+                
+                # Calculate motion percentage
+                motion_pixels = cv2.countNonZero(fg_mask)
+                total_pixels = fg_mask.shape[0] * fg_mask.shape[1]
+                motion_ratio = motion_pixels / total_pixels
+                
+                # Check if motion exceeds threshold
+                has_motion = motion_ratio >= self.motion_threshold
+                motion_detections.append(has_motion)
+                
+                time.sleep(0.1)  # Small delay between frames
+            
+            # Require motion in at least 2 out of 3 frames for reliability
+            motion_count = sum(motion_detections)
+            has_motion = motion_count >= 2
+            
+            if has_motion:
+                logger.debug(f"Motion detected ({motion_count}/3 frames)")
+            else:
+                logger.debug(f"No motion detected ({motion_count}/3 frames)")
+            
+            return has_motion
+        except Exception as e:
+            logger.error(f"Error checking motion: {e}")
+            return False
+    
+    def _motion_detection_loop(self) -> None:
+        """
+        Monitor for motion and start FFmpeg when motion is detected.
+        This loop only starts recording; chunk completion checks happen in segment monitor.
+        """
+        try:
+            # Initialize background subtractor (MOG2 is good for varying lighting)
+            self._background_subtractor = cv2.createBackgroundSubtractorMOG2(
+                history=500,
+                varThreshold=50,
+                detectShadows=True
+            )
+            
+            # Open video stream for motion detection
+            os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+            self._motion_cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+            
+            if not self._motion_cap.isOpened():
+                logger.error("Failed to open RTSP stream for motion detection")
+                return
+            
+            logger.info("Motion detection loop started")
+            
+            # Continuously check for motion to start recording
+            while self.is_recording and not self._stop_event.is_set():
+                with self._motion_lock:
+                    # Only check and start if FFmpeg is not currently recording
+                    if not self._ffmpeg_recording_active:
+                        has_motion = self._check_motion()
+                        if has_motion:
+                            logger.info("Motion detected, starting recording")
+                            self._motion_detected = True
+                            self._start_ffmpeg_recording()
+                
+                # Check less frequently when FFmpeg is recording (chunk completion handles stopping)
+                if self._ffmpeg_recording_active:
+                    time.sleep(1.0)  # Longer delay when recording
+                else:
+                    time.sleep(0.5)  # Check more frequently when waiting for motion
+            
+            # Cleanup
+            if self._motion_cap:
+                self._motion_cap.release()
+                self._motion_cap = None
+                    
+        except Exception as e:
+            logger.error(f"Error in motion detection loop: {e}", exc_info=True)
+            if self._motion_cap:
+                try:
+                    self._motion_cap.release()
+                except:
+                    pass
+                self._motion_cap = None
+    
+    def _start_ffmpeg_recording(self) -> None:
+        """Start FFmpeg recording process."""
+        if self._ffmpeg_recording_active:
+            return
+        
+        # If there's an existing FFmpeg process, stop it first
+        if self.current_ffmpeg_process:
+            try:
+                self.current_ffmpeg_process.terminate()
+                self.current_ffmpeg_process.wait(timeout=2)
+            except:
+                try:
+                    self.current_ffmpeg_process.kill()
+                except:
+                    pass
+            self.current_ffmpeg_process = None
+        
+        self._ffmpeg_recording_active = True
+        logger.info("Starting FFmpeg recording (motion detected)")
+        
+        # Start FFmpeg segmenter in a separate thread
+        # This will continuously record chunks while motion is detected
+        self.recording_thread = threading.Thread(
+            target=self._run_ffmpeg_segmenter,
+            daemon=True,
+            name="FFmpegRecorder"
+        )
+        self.recording_thread.start()
+    
+    def _stop_ffmpeg_recording(self) -> None:
+        """Stop FFmpeg recording process."""
+        if not self._ffmpeg_recording_active:
+            return
+        
+        self._ffmpeg_recording_active = False
+        if self.current_ffmpeg_process:
+            try:
+                self.current_ffmpeg_process.terminate()
+                try:
+                    self.current_ffmpeg_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.current_ffmpeg_process.kill()
+                    self.current_ffmpeg_process.wait()
+            except Exception as e:
+                logger.error(f"Error stopping FFmpeg: {e}")
+            finally:
+                self.current_ffmpeg_process = None
+
     def start_recording(self, callback: Optional[Callable[[str], None]] = None) -> None:
         """
         Start recording video chunks.
@@ -493,13 +682,25 @@ class VideoRecorder:
         )
         self.segment_monitor_thread.start()
 
-        self.recording_thread = threading.Thread(
-            target=self._record_loop,
-            daemon=True,
-            name="VideoRecorder"
-        )
-        self.recording_thread.start()
-        logger.info("Video recording started")
+        if self.motion_detection_enabled:
+            # Motion detection mode: monitor frames and only record when motion detected
+            logger.info(f"Starting motion detection (threshold={self.motion_threshold})")
+            self.motion_detection_thread = threading.Thread(
+                target=self._motion_detection_loop,
+                daemon=True,
+                name="MotionDetection"
+            )
+            self.motion_detection_thread.start()
+        else:
+            # Continuous recording mode: start FFmpeg immediately
+            self.recording_thread = threading.Thread(
+                target=self._record_loop,
+                daemon=True,
+                name="VideoRecorder"
+            )
+            self.recording_thread.start()
+        
+        logger.info(f"Video recording started (motion_detection={self.motion_detection_enabled})")
     
     def stop_recording(self) -> None:
         """Stop recording."""
@@ -509,6 +710,18 @@ class VideoRecorder:
         
         self.is_recording = False
         self._stop_event.set()
+        
+        # Stop motion detection if active
+        if self.motion_detection_enabled:
+            with self._motion_lock:
+                self._stop_ffmpeg_recording()
+            # Release motion capture
+            if self._motion_cap:
+                try:
+                    self._motion_cap.release()
+                except:
+                    pass
+                self._motion_cap = None
         
         # Kill FFmpeg process if running
         if self.current_ffmpeg_process:

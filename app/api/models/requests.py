@@ -13,6 +13,16 @@ class StartRecordingRequest(BaseModel):
         le=60,
         description="Duration of each video chunk in minutes (1-60). Defaults to server setting if not provided."
     )
+    motion_detection_enabled: Optional[bool] = Field(
+        False,
+        description="Enable motion detection - only record when motion is detected"
+    )
+    motion_threshold: Optional[float] = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        description="Motion detection threshold (0.0-1.0). Higher values require more motion to trigger recording."
+    )
 
 
 class QueryRequest(BaseModel):

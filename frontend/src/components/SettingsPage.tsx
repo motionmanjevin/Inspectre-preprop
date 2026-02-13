@@ -7,6 +7,8 @@ export function SettingsPage() {
   const [cameraName, setCameraName] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [chunkDuration, setChunkDuration] = useState(10); // Default 10 minutes
+  const [motionDetectionEnabled, setMotionDetectionEnabled] = useState(false);
+  const [motionThreshold, setMotionThreshold] = useState(0.3); // Default 0.3 (30%)
   const [isDetecting, setIsDetecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
@@ -23,6 +25,8 @@ export function SettingsPage() {
         setCameraName(settings.cameraName || "");
         setSystemPrompt(settings.systemPrompt || "");
         setChunkDuration(settings.chunkDuration || 10);
+        setMotionDetectionEnabled(settings.motionDetectionEnabled || false);
+        setMotionThreshold(settings.motionThreshold || 0.3);
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -67,7 +71,9 @@ export function SettingsPage() {
       rtspLink,
       cameraName,
       systemPrompt,
-      chunkDuration
+      chunkDuration,
+      motionDetectionEnabled,
+      motionThreshold
     };
     localStorage.setItem('inspectre_settings', JSON.stringify(settings));
     showStatus('success', 'Settings saved successfully');
@@ -87,10 +93,11 @@ export function SettingsPage() {
         setIsDetecting(false);
         showStatus('success', 'Recording stopped');
       } else {
-        // Start recording with chunk duration
-        await recordingApi.start(rtspLink, chunkDuration);
+        // Start recording with chunk duration and motion detection settings
+        await recordingApi.start(rtspLink, chunkDuration, motionDetectionEnabled, motionThreshold);
         setIsDetecting(true);
-        showStatus('success', `Recording started (${chunkDuration} min chunks)`);
+        const motionText = motionDetectionEnabled ? ` (motion detection: ${(motionThreshold * 100).toFixed(0)}%)` : '';
+        showStatus('success', `Recording started (${chunkDuration} min chunks${motionText})`);
       }
     } catch (error) {
       console.error('Toggle detection error:', error);
@@ -244,6 +251,87 @@ export function SettingsPage() {
                 <span>60 min</span>
               </div>
             </div>
+          </div>
+
+          {/* Motion Detection Toggle */}
+          <div className="space-y-2">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <label className="block text-white text-sm font-medium mb-1">
+                  Capture Only on Motion
+                </label>
+                <p className="text-gray-500 text-sm">
+                  Only record video chunks when motion is detected (uses background subtraction)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMotionDetectionEnabled(!motionDetectionEnabled)}
+                disabled={isDetecting}
+                className={`relative flex-shrink-0 h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-[#0a0a0a] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  motionDetectionEnabled ? 'bg-[#00ff88]' : 'bg-gray-600'
+                }`}
+                aria-label="Toggle motion detection"
+                aria-checked={motionDetectionEnabled}
+              >
+                <span
+                  className={`absolute inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-in-out ${
+                    motionDetectionEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                  style={{ top: '2px' }}
+                />
+              </button>
+            </div>
+
+            {/* Motion Threshold Slider (only shown when motion detection is enabled) */}
+            {motionDetectionEnabled && (
+              <div className="mt-4 space-y-3 pl-2 border-l-2 border-[#00ff88]/30">
+                <div className="flex items-center justify-between">
+                  <label className="block text-white text-sm font-medium">
+                    Motion Detection Threshold
+                  </label>
+                  <span className="text-[#00ff88] text-sm font-medium">
+                    {(motionThreshold * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <p className="text-gray-500 text-sm mb-3">
+                  Higher values require more motion to trigger recording (less sensitive)
+                </p>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={motionThreshold}
+                      onChange={(e) => setMotionThreshold(parseFloat(e.target.value))}
+                      disabled={isDetecting}
+                      className="flex-1 h-2 bg-[#1a1a1a] rounded-lg appearance-none cursor-pointer accent-[#00ff88] disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={motionThreshold}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (val >= 0 && val <= 1) setMotionThreshold(val);
+                        }}
+                        disabled={isDetecting}
+                        className="w-20 bg-[#0f0f0f] border border-[#1a1a1a] rounded-lg px-2 py-2 text-white text-center focus:outline-none focus:border-[#2a2a2a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-600">
+                    <span>More Sensitive</span>
+                    <span>Less Sensitive</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Camera Name Input */}
