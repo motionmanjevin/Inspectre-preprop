@@ -12,11 +12,18 @@ interface Message {
   isLoading?: boolean;
 }
 
+interface Timestamp {
+  seconds: number;
+  display: string;
+  original: string;
+}
+
 interface VideoSearchResult {
   camera: string;
   timestamp: string;
   description: string;
   videoUrl: string;
+  timestamps?: Timestamp[];
 }
 
 export const ChatPage = forwardRef<{ 
@@ -36,6 +43,7 @@ export const ChatPage = forwardRef<{
   const [loadingDates, setLoadingDates] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timeFilterRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
@@ -81,6 +89,89 @@ export const ChatPage = forwardRef<{
     } finally {
       setLoadingDates(false);
     }
+  };
+
+  // Parse timestamps from text
+  const parseTimestamps = (text: string): Timestamp[] => {
+    if (!text) return [];
+    
+    const timestamps: Timestamp[] = [];
+    
+    // Pattern 1: HH:MM:SS format (e.g., "00:05:30", "1:23:45")
+    const hmsPattern = /(\d{1,2}):(\d{2}):(\d{2})/g;
+    let match;
+    while ((match = hmsPattern.exec(text)) !== null) {
+      const hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const seconds = parseInt(match[3], 10);
+      const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+      timestamps.push({
+        seconds: totalSeconds,
+        display: match[0],
+        original: match[0]
+      });
+    }
+    
+    // Pattern 2: MM:SS format (e.g., "5:30", "23:45")
+    const msPattern = /(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$|[^\d:])/g;
+    while ((match = msPattern.exec(text)) !== null) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseInt(match[2], 10);
+      // Only add if it's a reasonable time (less than 60 minutes for MM:SS format)
+      if (minutes < 60) {
+        const totalSeconds = minutes * 60 + seconds;
+        // Avoid duplicates
+        if (!timestamps.some(t => t.seconds === totalSeconds)) {
+          timestamps.push({
+            seconds: totalSeconds,
+            display: match[0].trim(),
+            original: match[0].trim()
+          });
+        }
+      }
+    }
+    
+    // Pattern 3: "X minutes Y seconds" or "X min Y sec" format
+    const minutesSecondsPattern = /(\d+)\s*(?:minutes?|mins?|m)\s*(?:and\s*)?(\d+)?\s*(?:seconds?|secs?|s)?/gi;
+    while ((match = minutesSecondsPattern.exec(text)) !== null) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = match[2] ? parseInt(match[2], 10) : 0;
+      const totalSeconds = minutes * 60 + seconds;
+      if (!timestamps.some(t => t.seconds === totalSeconds)) {
+        timestamps.push({
+          seconds: totalSeconds,
+          display: `${minutes}:${seconds.toString().padStart(2, '0')}`,
+          original: match[0]
+        });
+      }
+    }
+    
+    // Pattern 4: "X seconds" or "X sec" format
+    const secondsPattern = /(\d+)\s*(?:seconds?|secs?|s)(?:\s|$|[^\d])/gi;
+    while ((match = secondsPattern.exec(text)) !== null) {
+      const seconds = parseInt(match[1], 10);
+      if (!timestamps.some(t => t.seconds === seconds)) {
+        timestamps.push({
+          seconds: seconds,
+          display: `0:${seconds.toString().padStart(2, '0')}`,
+          original: match[0]
+        });
+      }
+    }
+    
+    // Sort by seconds and remove duplicates
+    const uniqueTimestamps: Timestamp[] = [];
+    const seen = new Set<number>();
+    timestamps
+      .sort((a, b) => a.seconds - b.seconds)
+      .forEach(t => {
+        if (!seen.has(t.seconds)) {
+          seen.add(t.seconds);
+          uniqueTimestamps.push(t);
+        }
+      });
+    
+    return uniqueTimestamps;
   };
 
   // Convert backend clip to frontend VideoSearchResult
@@ -178,6 +269,9 @@ export const ChatPage = forwardRef<{
           videoResults: response.results
             .filter(r => r.video_url)
             .map(r => {
+              // Parse timestamps from analysis text
+              const timestamps = r.analysis ? parseTimestamps(r.analysis) : [];
+              
               // Use local endpoint if local_path exists, otherwise fallback to R2 URL
               const videoUrl = r.local_path 
                 ? `${API_BASE_URL}/videos/${encodeURIComponent(String(r.local_path))}${token ? `?token=${encodeURIComponent(token)}` : ""}`
@@ -186,7 +280,8 @@ export const ChatPage = forwardRef<{
                 camera: "Analyzed Video",
                 timestamp: new Date().toLocaleString(),
                 description: r.analysis || "Video analyzed",
-                videoUrl: videoUrl
+                videoUrl: videoUrl,
+                timestamps: timestamps
               };
             })
         };
@@ -556,6 +651,7 @@ export const ChatPage = forwardRef<{
               {/* Video Player */}
               <div className="relative flex-1">
                 <video
+                  ref={videoRef}
                   key={selectedVideo.videoUrl}
                   autoPlay
                   loop
@@ -586,7 +682,33 @@ export const ChatPage = forwardRef<{
               {/* Description Side Panel */}
               <div className="w-full md:w-80 bg-[#0a0a0a] border-t md:border-t-0 md:border-l border-[#1a1a1a] p-4 md:p-6 overflow-y-auto">
                 <h4 className="text-white text-sm mb-2">Event Description</h4>
-                <p className="text-gray-400 text-sm whitespace-pre-wrap break-words">{selectedVideo.description}</p>
+                <p className="text-gray-400 text-sm whitespace-pre-wrap break-words mb-4">{selectedVideo.description}</p>
+                
+                {/* Timestamp buttons */}
+                {selectedVideo.timestamps && selectedVideo.timestamps.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-[#1a1a1a]">
+                    <h4 className="text-white text-sm mb-3 flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      Jump to:
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedVideo.timestamps.map((ts, index) => (
+                        <button
+                          key={index}
+                          onClick={() => {
+                            if (videoRef.current) {
+                              videoRef.current.currentTime = ts.seconds;
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-[#00ff88]/10 hover:bg-[#00ff88]/20 border border-[#00ff88]/30 rounded-lg transition-colors flex items-center gap-1.5 group"
+                        >
+                          <Clock className="w-3.5 h-3.5 text-[#00ff88]" />
+                          <span className="text-[#00ff88] text-xs font-medium">{ts.display}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
