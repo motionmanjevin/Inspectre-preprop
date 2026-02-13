@@ -28,6 +28,7 @@ import {
   getAuthToken, 
   getTunnelUrl, 
   setTunnelUrl, 
+  removeAuthToken,
   initializeApiBaseUrl,
   API_BASE_URL 
 } from './utils/api';
@@ -295,6 +296,18 @@ export default function App() {
         }]);
       }
     } catch (error) {
+      // Handle token expiration
+      if (error.code === 'TOKEN_EXPIRED' || error.message?.includes('Token expired')) {
+        setIsLoggedIn(false);
+        await removeAuthToken();
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please login again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
       setMessages(prev => [...prev, {
         id: Date.now(),
         type: 'llm',
@@ -343,6 +356,18 @@ export default function App() {
         }]);
       }
     } catch (error) {
+      // Handle token expiration
+      if (error.code === 'TOKEN_EXPIRED' || error.message?.includes('Token expired')) {
+        setIsLoggedIn(false);
+        await removeAuthToken();
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please login again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
       setMessages(prev => [...prev, {
         id: Date.now(),
         type: 'llm',

@@ -101,6 +101,38 @@ export const removeAuthToken = async () => {
 };
 
 /**
+ * Make unauthenticated API request (for login/register)
+ */
+async function unauthenticatedRequest(endpoint, options = {}) {
+  // Ensure API_BASE_URL is initialized
+  const baseUrl = await initializeApiBaseUrl();
+  const url = `${baseUrl}${endpoint}`;
+  
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+  
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+  
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const errorData = await response.json();
+      detail = errorData.detail || '';
+    } catch {
+      detail = response.statusText;
+    }
+    throw new Error(detail || `API request failed: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+/**
  * Make API request with authentication
  */
 async function apiRequest(endpoint, options = {}) {
@@ -131,6 +163,17 @@ async function apiRequest(endpoint, options = {}) {
     } catch {
       detail = response.statusText;
     }
+    
+    // Handle expired/invalid token (401)
+    if (response.status === 401) {
+      // Clear expired token
+      await removeAuthToken();
+      // Throw a special error that can be caught by the app
+      const error = new Error('Token expired. Please login again.');
+      error.code = 'TOKEN_EXPIRED';
+      throw error;
+    }
+    
     throw new Error(detail || `API request failed: ${response.status}`);
   }
   
@@ -145,7 +188,7 @@ export const authApi = {
    * Register a new user
    */
   async register(email, password) {
-    const response = await apiRequest('/auth/register', {
+    const response = await unauthenticatedRequest('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -157,7 +200,7 @@ export const authApi = {
    * Login user
    */
   async login(email, password) {
-    const response = await apiRequest('/auth/login', {
+    const response = await unauthenticatedRequest('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
