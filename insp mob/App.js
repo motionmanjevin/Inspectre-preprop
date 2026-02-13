@@ -329,25 +329,44 @@ export default function App() {
     setIsLoading(true);
 
     try {
+      const token = await getAuthToken();
       const response = await analysisApi.analyze(queryText, 5);
       
-      // Combine all analysis results
+      // Process each analysis result - show video card + analysis text
       if (response.results && response.results.length > 0) {
-        const analysisText = response.results
-          .map((result, index) => {
-            if (result.error) {
-              return `Video ${index + 1}: Error - ${result.error}`;
-            }
-            return result.analysis || '';
-          })
-          .filter(text => text)
-          .join('\n\n---\n\n');
-        
-        setMessages(prev => [...prev, {
-          id: Date.now(),
-          type: 'llm',
-          analysis: analysisText || 'No analysis available.',
-        }]);
+        response.results.forEach((result, index) => {
+          // Add video card first
+          const localPath = result.local_path;
+          const playableUrl = localPath
+            ? `${API_BASE_URL}/videos/${encodeURIComponent(String(localPath))}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+            : result.video_url;
+
+          const videoMessage = {
+            id: Date.now() + index * 2,
+            type: 'video',
+            title: `Analysis Result ${index + 1}`,
+            timestamp: new Date().toISOString(),
+            location: localPath || result.video_url,
+            videoUrl: playableUrl,
+            localPath: localPath,
+          };
+          setMessages(prev => [...prev, videoMessage]);
+
+          // Then add analysis text
+          if (result.error) {
+            setMessages(prev => [...prev, {
+              id: Date.now() + index * 2 + 1,
+              type: 'llm',
+              analysis: `Video ${index + 1}: Error - ${result.error}`,
+            }]);
+          } else if (result.analysis) {
+            setMessages(prev => [...prev, {
+              id: Date.now() + index * 2 + 1,
+              type: 'llm',
+              analysis: result.analysis,
+            }]);
+          }
+        });
       } else {
         setMessages(prev => [...prev, {
           id: Date.now(),

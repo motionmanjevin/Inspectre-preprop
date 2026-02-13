@@ -284,6 +284,9 @@ class QwenVLClient:
         Raises:
             QwenAPIError: If API call fails
         """
+        # Add timestamp request to the query
+        full_query = f"{user_query}\n\nPlease provide the relevant timestamp(s) for any events or actions mentioned in your analysis."
+        
         payload = {
             "model": "qwen3-vl-flash",
             "messages": [
@@ -299,7 +302,7 @@ class QwenVLClient:
                         },
                         {
                             "type": "text",
-                            "text": user_query
+                            "text": full_query
                         }
                     ]
                 }
