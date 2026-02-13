@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import EyeIcon from './components/EyeIcon';
 import SplashScreen from './components/SplashScreen';
 import LoginScreen from './components/LoginScreen';
@@ -71,9 +71,118 @@ const AnimatedText = ({ children, delay = 0 }) => {
   );
 };
 
+// Utility function to parse timestamps from text
+const parseTimestamps = (text) => {
+  if (!text) return [];
+  
+  const timestamps = [];
+  
+  // Pattern 1: HH:MM:SS format (e.g., "00:05:30", "1:23:45")
+  const hmsPattern = /(\d{1,2}):(\d{2}):(\d{2})/g;
+  let match;
+  while ((match = hmsPattern.exec(text)) !== null) {
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const seconds = parseInt(match[3], 10);
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+    timestamps.push({
+      seconds: totalSeconds,
+      display: match[0],
+      original: match[0]
+    });
+  }
+  
+  // Pattern 2: MM:SS format (e.g., "5:30", "23:45")
+  const msPattern = /(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$|[^\d:])/g;
+  while ((match = msPattern.exec(text)) !== null) {
+    const minutes = parseInt(match[1], 10);
+    const seconds = parseInt(match[2], 10);
+    // Only add if it's a reasonable time (less than 60 minutes for MM:SS format)
+    if (minutes < 60) {
+      const totalSeconds = minutes * 60 + seconds;
+      // Avoid duplicates
+      if (!timestamps.some(t => t.seconds === totalSeconds)) {
+        timestamps.push({
+          seconds: totalSeconds,
+          display: match[0].trim(),
+          original: match[0].trim()
+        });
+      }
+    }
+  }
+  
+  // Pattern 3: "X minutes Y seconds" or "X min Y sec" format
+  const minutesSecondsPattern = /(\d+)\s*(?:minutes?|mins?|m)\s*(?:and\s*)?(\d+)?\s*(?:seconds?|secs?|s)?/gi;
+  while ((match = minutesSecondsPattern.exec(text)) !== null) {
+    const minutes = parseInt(match[1], 10);
+    const seconds = match[2] ? parseInt(match[2], 10) : 0;
+    const totalSeconds = minutes * 60 + seconds;
+    if (!timestamps.some(t => t.seconds === totalSeconds)) {
+      timestamps.push({
+        seconds: totalSeconds,
+        display: `${minutes}:${seconds.toString().padStart(2, '0')}`,
+        original: match[0]
+      });
+    }
+  }
+  
+  // Pattern 4: "X seconds" or "X sec" format
+  const secondsPattern = /(\d+)\s*(?:seconds?|secs?|s)(?:\s|$|[^\d])/gi;
+  while ((match = secondsPattern.exec(text)) !== null) {
+    const seconds = parseInt(match[1], 10);
+    if (!timestamps.some(t => t.seconds === seconds)) {
+      timestamps.push({
+        seconds: seconds,
+        display: `0:${seconds.toString().padStart(2, '0')}`,
+        original: match[0]
+      });
+    }
+  }
+  
+  // Sort by seconds and remove duplicates
+  const uniqueTimestamps = [];
+  const seen = new Set();
+  timestamps
+    .sort((a, b) => a.seconds - b.seconds)
+    .forEach(t => {
+      if (!seen.has(t.seconds)) {
+        seen.add(t.seconds);
+        uniqueTimestamps.push(t);
+      }
+    });
+  
+  return uniqueTimestamps;
+};
+
 // Video Overlay Modal Component
 const VideoOverlay = ({ visible, onClose, videoData }) => {
+  const videoRef = useRef(null);
+  
   if (!visible) return null;
+
+  const timestamps = videoData?.timestamps || [];
+
+  const handleSeek = async (seconds) => {
+    try {
+      if (videoRef.current) {
+        // Use playFromPositionAsync for more reliable seeking
+        await videoRef.current.playFromPositionAsync(seconds * 1000, {
+          toleranceMillisBefore: 100,
+          toleranceMillisAfter: 100,
+        });
+      }
+    } catch (error) {
+      console.error('Error seeking video:', error);
+      // Fallback to setPositionAsync if playFromPositionAsync fails
+      try {
+        if (videoRef.current) {
+          await videoRef.current.setPositionAsync(seconds * 1000);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback seek also failed:', fallbackError);
+      }
+    }
+  };
 
   return (
     <Modal
@@ -96,6 +205,7 @@ const VideoOverlay = ({ visible, onClose, videoData }) => {
           <View style={styles.videoPlayerContainer}>
             {videoData?.videoUrl ? (
               <Video
+                ref={videoRef}
                 source={{ uri: videoData.videoUrl }}
                 style={styles.videoPlayer}
                 useNativeControls
@@ -114,6 +224,37 @@ const VideoOverlay = ({ visible, onClose, videoData }) => {
               <Text style={styles.overlayTitle}>{videoData.title}</Text>
               <Text style={styles.overlayMeta}>{videoData.timestamp}</Text>
               <Text style={styles.overlayLocation}>{videoData.location}</Text>
+              
+              {/* Timestamp buttons */}
+              {timestamps.length > 0 && (
+                <View style={styles.timestampsContainer}>
+                  <Text style={styles.timestampsLabel}>Jump to:</Text>
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.timestampsScroll}
+                  >
+                    {timestamps.map((ts, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.timestampButton}
+                        onPress={() => handleSeek(ts.seconds)}
+                        activeOpacity={0.7}
+                      >
+                        <LinearGradient
+                          colors={['rgba(0, 255, 136, 0.3)', 'rgba(0, 255, 136, 0.2)', 'rgba(0, 255, 136, 0.15)']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                          style={styles.timestampButtonGradient}
+                        >
+                          <Ionicons name="time-outline" size={14} color="#00ff88" style={styles.timestampIcon} />
+                          <Text style={styles.timestampText}>{ts.display}</Text>
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -335,6 +476,9 @@ export default function App() {
       // Process each analysis result - show video card + analysis text
       if (response.results && response.results.length > 0) {
         response.results.forEach((result, index) => {
+          // Parse timestamps from analysis text
+          const timestamps = result.analysis ? parseTimestamps(result.analysis) : [];
+          
           // Add video card first
           const localPath = result.local_path;
           const playableUrl = localPath
@@ -349,6 +493,7 @@ export default function App() {
             location: localPath || result.video_url,
             videoUrl: playableUrl,
             localPath: localPath,
+            timestamps: timestamps, // Store parsed timestamps
           };
           setMessages(prev => [...prev, videoMessage]);
 
@@ -851,5 +996,44 @@ const styles = StyleSheet.create({
     color: '#606060',
     fontSize: 15,
     fontWeight: '400',
+  },
+  timestampsContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  timestampsLabel: {
+    color: '#808080',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 12,
+    letterSpacing: 0.3,
+  },
+  timestampsScroll: {
+    paddingRight: 8,
+  },
+  timestampButton: {
+    marginRight: 8,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  timestampButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 136, 0.3)',
+    borderRadius: 8,
+  },
+  timestampIcon: {
+    marginRight: 6,
+  },
+  timestampText: {
+    color: '#00ff88',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
 });
