@@ -102,13 +102,13 @@ const AlertsPage = ({ onBack }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            <Ionicons name="arrow-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Alerts</Text>
           <View style={styles.backButton} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#00ff88" />
+          <ActivityIndicator size="large" color="#6b7280" />
         </View>
       </View>
     );
@@ -119,14 +119,14 @@ const AlertsPage = ({ onBack }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Alerts</Text>
         <TouchableOpacity
           onPress={() => setShowCreateAlert(true)}
           style={styles.addButton}
         >
-          <Ionicons name="add" size={24} color="#00ff88" />
+          <Ionicons name="add" size={24} color="#6b7280" />
         </TouchableOpacity>
       </View>
 
@@ -285,7 +285,7 @@ const AlertsPage = ({ onBack }) => {
                 onPress={createAlert}
               >
                 <LinearGradient
-                  colors={['rgba(0, 255, 136, 0.3)', 'rgba(0, 255, 136, 0.2)']}
+                  colors={['rgba(107, 114, 128, 0.2)', 'rgba(75, 85, 99, 0.15)']}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.modalCreateGradient}
@@ -304,17 +304,17 @@ const AlertsPage = ({ onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f3f4f6',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 60,
+    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   backButton: {
     width: 40,
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 0.5,
   },
   addButton: {
@@ -345,20 +345,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     borderRadius: 8,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#ffffff',
   },
   tabActive: {
-    backgroundColor: 'rgba(0, 255, 136, 0.2)',
+    backgroundColor: 'rgba(107, 114, 128, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 136, 0.3)',
+    borderColor: 'rgba(107, 114, 128, 0.2)',
   },
   tabText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#808080',
+    color: '#6b7280',
   },
   tabTextActive: {
-    color: '#00ff88',
+    color: '#4b5563',
   },
   content: {
     flex: 1,
@@ -374,17 +374,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   alertCard: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   alertContent: {
     marginBottom: 12,
   },
   alertQuery: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '500',
     marginBottom: 8,
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   alertMetaText: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 12,
   },
   alertActions: {
@@ -407,20 +407,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#f3f4f6',
   },
   toggleButtonActive: {
-    backgroundColor: 'rgba(0, 255, 136, 0.2)',
+    backgroundColor: 'rgba(107, 114, 128, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 136, 0.3)',
+    borderColor: 'rgba(107, 114, 128, 0.2)',
   },
   toggleButtonText: {
-    color: '#808080',
+    color: '#9ca3af',
     fontSize: 13,
     fontWeight: '500',
   },
   toggleButtonTextActive: {
-    color: '#00ff88',
+    color: '#4b5563',
   },
   deleteButton: {
     padding: 8,
@@ -429,27 +429,27 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   historyCard: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   historyHeader: {
     marginBottom: 8,
   },
   historyQuery: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '500',
     marginBottom: 4,
   },
   historyTime: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 12,
   },
   historySnippet: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 13,
     lineHeight: 18,
   },
@@ -459,32 +459,32 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 14,
     textAlign: 'center',
   },
   modalOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 20,
     width: '100%',
     maxWidth: 400,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -493,15 +493,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '600',
   },
   modalInput: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#f3f4f6',
     borderRadius: 8,
     padding: 12,
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 15,
     minHeight: 100,
     textAlignVertical: 'top',
@@ -516,10 +516,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     borderRadius: 8,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#f3f4f6',
   },
   modalCancelText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 15,
     fontWeight: '500',
   },
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalCreateText: {
-    color: '#00ff88',
+    color: '#4b5563',
     fontSize: 15,
     fontWeight: '600',
   },

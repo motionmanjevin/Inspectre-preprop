@@ -249,12 +249,12 @@ const VideoOverlay = ({ visible, onClose, videoData }) => {
                         activeOpacity={0.7}
                       >
                         <LinearGradient
-                          colors={['rgba(0, 255, 136, 0.3)', 'rgba(0, 255, 136, 0.2)', 'rgba(0, 255, 136, 0.15)']}
+                          colors={['rgba(107, 114, 128, 0.25)', 'rgba(107, 114, 128, 0.15)', 'rgba(75, 85, 99, 0.1)']}
                           start={{ x: 0, y: 0 }}
                           end={{ x: 1, y: 1 }}
                           style={styles.timestampButtonGradient}
                         >
-                          <Ionicons name="time-outline" size={14} color="#00ff88" style={styles.timestampIcon} />
+                          <Ionicons name="time-outline" size={14} color="#6b7280" style={styles.timestampIcon} />
                           <Text style={styles.timestampText}>{ts.display}</Text>
                         </LinearGradient>
                       </TouchableOpacity>
@@ -757,12 +757,12 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
+      <StatusBar barStyle="dark-content" backgroundColor="#f3f4f6" />
       
       {/* Gradient Background Spots */}
       <View style={styles.gradientSpot1} pointerEvents="none">
         <LinearGradient
-          colors={['rgba(100, 100, 255, 0.08)', 'rgba(100, 100, 255, 0)', 'transparent']}
+          colors={['rgba(129, 140, 248, 0.12)', 'rgba(129, 140, 248, 0.04)', 'rgba(129, 140, 248, 0)', 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -770,7 +770,7 @@ export default function App() {
       </View>
       <View style={styles.gradientSpot2} pointerEvents="none">
         <LinearGradient
-          colors={['rgba(150, 100, 200, 0.06)', 'rgba(150, 100, 200, 0)', 'transparent']}
+          colors={['rgba(244, 114, 182, 0.1)', 'rgba(244, 114, 182, 0.03)', 'rgba(244, 114, 182, 0)', 'transparent']}
           start={{ x: 1, y: 0 }}
           end={{ x: 0, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -778,7 +778,7 @@ export default function App() {
       </View>
       <View style={styles.gradientSpot3} pointerEvents="none">
         <LinearGradient
-          colors={['rgba(200, 150, 100, 0.05)', 'rgba(200, 150, 100, 0)', 'transparent']}
+          colors={['rgba(96, 165, 250, 0.08)', 'rgba(96, 165, 250, 0.02)', 'rgba(96, 165, 250, 0)', 'transparent']}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -794,7 +794,7 @@ export default function App() {
             onPress={() => setShowMenuDrawer(true)}
             style={styles.menuButton}
           >
-            <Ionicons name="menu" size={24} color="#FFFFFF" />
+            <Ionicons name="menu" size={24} color="#111827" />
           </TouchableOpacity>
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>Inspectre</Text>
@@ -811,7 +811,7 @@ export default function App() {
               }}
               style={styles.filterButton}
             >
-              <Ionicons name="calendar-outline" size={20} color="#00ff88" />
+              <Ionicons name="calendar-outline" size={20} color="#6b7280" />
             </TouchableOpacity>
           )}
           {currentPage !== 'chat' && <View style={styles.menuButton} />}
@@ -848,7 +848,7 @@ export default function App() {
             <View style={styles.inputContainer}>
           <View style={styles.inputWrapper}>
             <LinearGradient
-              colors={['rgba(150, 150, 200, 0.15)', 'rgba(100, 100, 150, 0.08)', 'rgba(50, 50, 100, 0.05)']}
+              colors={['rgba(129, 140, 248, 0.18)', 'rgba(129, 140, 248, 0.06)', 'rgba(37, 99, 235, 0.04)']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={styles.inputGradientBorder}
@@ -858,7 +858,7 @@ export default function App() {
               value={message}
               onChangeText={setMessage}
               placeholder="Message Inspectre"
-              placeholderTextColor="#666"
+                placeholderTextColor="#9ca3af"
               multiline
               maxLength={500}
             />
@@ -868,14 +868,14 @@ export default function App() {
                 onPress={handleSearch}
                 disabled={!message.trim() || isLoading}
               >
-                <Ionicons name="search" size={20} color={message.trim() && !isLoading ? "#606060" : "#333333"} />
+                <Ionicons name="search" size={20} color={message.trim() && !isLoading ? "#111827" : "#9ca3af"} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionButton, styles.sendButton]}
                 onPress={handleSend}
                 disabled={!message.trim() || isLoading}
               >
-                <Ionicons name="send" size={20} color={message.trim() && !isLoading ? "#606060" : "#333333"} />
+                <Ionicons name="send" size={20} color={message.trim() && !isLoading ? "#111827" : "#9ca3af"} />
               </TouchableOpacity>
             </View>
           </View>
@@ -921,34 +921,37 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f3f4f6',
   },
   gradientSpot1: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    width: width * 0.6,
-    height: height * 0.4,
-    borderRadius: width * 0.6,
-    opacity: 0.4,
+    top: -height * 0.2,
+    left: -width * 0.2,
+    width: width * 1.2,
+    height: height * 0.8,
+    borderRadius: width * 1.2,
+    opacity: 0.15,
+    overflow: 'hidden',
   },
   gradientSpot2: {
     position: 'absolute',
-    top: height * 0.3,
-    right: 0,
-    width: width * 0.5,
-    height: height * 0.5,
-    borderRadius: width * 0.5,
-    opacity: 0.3,
+    top: height * 0.1,
+    right: -width * 0.15,
+    width: width * 1.0,
+    height: height * 0.7,
+    borderRadius: width * 1.0,
+    opacity: 0.12,
+    overflow: 'hidden',
   },
   gradientSpot3: {
     position: 'absolute',
-    bottom: height * 0.2,
-    left: width * 0.2,
-    width: width * 0.4,
-    height: height * 0.3,
-    borderRadius: width * 0.4,
-    opacity: 0.25,
+    bottom: -height * 0.1,
+    left: -width * 0.1,
+    width: width * 0.9,
+    height: height * 0.6,
+    borderRadius: width * 0.9,
+    opacity: 0.1,
+    overflow: 'hidden',
   },
   keyboardAvoid: {
     flex: 1,
@@ -957,11 +960,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
+    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   menuButton: {
     width: 40,
@@ -976,12 +979,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#FFFFFF',
-    letterSpacing: 2,
+    color: '#111827',
+    letterSpacing: 1.2,
   },
   timeFilterText: {
     fontSize: 11,
-    color: '#00ff88',
+    color: '#6b7280',
     marginTop: 2,
     fontWeight: '500',
   },
@@ -1002,11 +1005,11 @@ const styles = StyleSheet.create({
   },
   welcomeText: {
     fontSize: 16,
-    color: '#808080',
+    color: '#4b5563',
     textAlign: 'center',
     marginTop: 40,
-    fontWeight: '300',
-    letterSpacing: 0.3,
+    fontWeight: '400',
+    letterSpacing: 0.2,
   },
   messagesContainer: {
     flex: 1,
@@ -1031,13 +1034,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   userMessage: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 20,
   },
   userMessageText: {
-    color: '#e8e8e8',
+    color: '#111827',
     fontSize: 15,
     lineHeight: 20,
   },
@@ -1066,7 +1069,7 @@ const styles = StyleSheet.create({
     paddingLeft: 16,
   },
   aiText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     lineHeight: 24,
     fontWeight: '400',
@@ -1086,26 +1089,26 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   videoCard: {
-    backgroundColor: '#121212',
+    backgroundColor: '#ffffff',
     paddingVertical: 20,
     paddingHorizontal: 20,
     borderRadius: 12,
   },
   videoTitle: {
-    color: '#e8e8e8',
+    color: '#111827',
     fontSize: 15,
     fontWeight: '500',
     marginBottom: 8,
     letterSpacing: 0.2,
   },
   videoMeta: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 13,
     marginBottom: 4,
     fontWeight: '400',
   },
   videoLocation: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 13,
     fontWeight: '400',
   },
@@ -1116,7 +1119,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#ffffff',
     borderRadius: 24,
     paddingHorizontal: 20,
     paddingVertical: 14,
@@ -1134,7 +1137,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    color: '#e8e8e8',
+    color: '#111827',
     fontSize: 15,
     maxHeight: 120,
     marginRight: 16,
@@ -1168,7 +1171,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#404040',
+    backgroundColor: '#cbd5f5',
   },
   dot1: {},
   dot2: {},
@@ -1177,11 +1180,11 @@ const styles = StyleSheet.create({
   // Video Overlay Styles
   overlayBackground: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
     justifyContent: 'flex-end',
   },
   overlayContainer: {
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f9fafb',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 20,
@@ -1198,7 +1201,7 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   videoPlayer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#e5e7eb',
     height: 220,
     borderRadius: 12,
     justifyContent: 'center',
@@ -1208,20 +1211,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   overlayTitle: {
-    color: '#e8e8e8',
+    color: '#111827',
     fontSize: 20,
     fontWeight: '500',
     marginBottom: 12,
     lineHeight: 26,
   },
   overlayMeta: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 15,
     marginBottom: 8,
     fontWeight: '400',
   },
   overlayLocation: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 15,
     fontWeight: '400',
   },
@@ -1232,7 +1235,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   timestampsLabel: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 12,
@@ -1252,14 +1255,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 136, 0.3)',
+    borderColor: 'rgba(107, 114, 128, 0.2)',
     borderRadius: 8,
   },
   timestampIcon: {
     marginRight: 6,
   },
   timestampText: {
-    color: '#00ff88',
+    color: '#6b7280',
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.2,

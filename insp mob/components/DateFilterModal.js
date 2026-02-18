@@ -27,7 +27,7 @@ const DateFilterModal = ({ visible, onClose, onSelectDate, availableDates, loadi
         />
         <View style={styles.modalContainer}>
           <LinearGradient
-            colors={['#0f0f0f', '#0a0a0a', '#050505']}
+            colors={['#f9fafb', '#f3f4f6', '#e5e7eb']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.modalGradient}
@@ -51,7 +51,7 @@ const DateFilterModal = ({ visible, onClose, onSelectDate, availableDates, loadi
             >
               {loading ? (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#00ff88" />
+                  <ActivityIndicator size="large" color="#6b7280" />
                   <Text style={styles.loadingText}>Loading dates...</Text>
                 </View>
               ) : (
@@ -66,13 +66,13 @@ const DateFilterModal = ({ visible, onClose, onSelectDate, availableDates, loadi
                     activeOpacity={0.7}
                   >
                     <LinearGradient
-                      colors={['rgba(0, 255, 136, 0.15)', 'rgba(0, 255, 136, 0.05)', 'transparent']}
+                      colors={['rgba(107, 114, 128, 0.12)', 'rgba(75, 85, 99, 0.06)', 'transparent']}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={styles.dateOptionGradient}
                     >
                       <View style={styles.dateOptionContent}>
-                        <Ionicons name="time-outline" size={20} color="#00ff88" />
+                        <Ionicons name="time-outline" size={20} color="#6b7280" />
                         <Text style={styles.dateOptionText}>Last 24 hours</Text>
                         <Ionicons name="chevron-forward" size={20} color="#606060" />
                       </View>
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
   },
   modalContainer: {
     width: '90%',
@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   modalGradient: {
     borderRadius: 20,
@@ -159,12 +159,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   title: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 0.5,
   },
   closeButton: {
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   loadingText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 14,
     marginTop: 12,
   },
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   dateOptionGradient: {
     paddingVertical: 16,
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 0.3,
   },
   sectionHeader: {
@@ -220,13 +220,13 @@ const styles = StyleSheet.create({
   sectionLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(15, 23, 42, 0.06)',
   },
   sectionText: {
     marginHorizontal: 12,
     fontSize: 12,
     fontWeight: '500',
-    color: '#606060',
+    color: '#6b7280',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
@@ -236,14 +236,14 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   emptyText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 13,
     textAlign: 'center',
   },

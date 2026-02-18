@@ -54,13 +54,13 @@ const ProcessingTimelinePage = ({ onBack }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            <Ionicons name="arrow-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Processing Timeline</Text>
           <View style={styles.backButton} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#00ff88" />
+          <ActivityIndicator size="large" color="#6b7280" />
         </View>
       </View>
     );
@@ -73,11 +73,11 @@ const ProcessingTimelinePage = ({ onBack }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Processing Timeline</Text>
         <TouchableOpacity onPress={fetchStats} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={24} color="#00ff88" />
+          <Ionicons name="refresh" size={24} color="#6b7280" />
         </TouchableOpacity>
       </View>
 
@@ -94,7 +94,7 @@ const ProcessingTimelinePage = ({ onBack }) => {
           <View style={styles.progressBarContainer}>
             <View style={styles.progressBarBackground}>
               <LinearGradient
-                colors={['#00ff88', '#00cc6a', '#00994d']}
+                colors={['rgba(107, 114, 128, 0.8)', 'rgba(75, 85, 99, 0.7)', 'rgba(55, 65, 81, 0.6)']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={[styles.progressBarFill, { width: `${progress}%` }]}
@@ -136,10 +136,10 @@ const ProcessingTimelinePage = ({ onBack }) => {
                     <LinearGradient
                       colors={
                         hourProgress === 1
-                          ? ['#00ff88', '#00cc6a']
+                          ? ['rgba(107, 114, 128, 0.8)', 'rgba(75, 85, 99, 0.7)']
                           : hourProgress > 0
-                          ? ['rgba(0, 255, 136, 0.5)', 'rgba(0, 204, 106, 0.5)']
-                          : ['#1a1a1a', '#1a1a1a']
+                          ? ['rgba(107, 114, 128, 0.4)', 'rgba(75, 85, 99, 0.3)']
+                          : ['#e5e7eb', '#e5e7eb']
                       }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 0, y: 1 }}
@@ -165,17 +165,17 @@ const ProcessingTimelinePage = ({ onBack }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f3f4f6',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 60,
+    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   backButton: {
     width: 40,
@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 0.5,
   },
   refreshButton: {
@@ -206,11 +206,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   progressCard: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
     marginBottom: 16,
   },
   progressHeader: {
@@ -220,12 +220,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   progressTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '600',
   },
   progressPercentage: {
-    color: '#00ff88',
+    color: '#4b5563',
     fontSize: 18,
     fontWeight: '600',
   },
@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
   },
   progressBarBackground: {
     height: 8,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#e5e7eb',
     borderRadius: 4,
     overflow: 'hidden',
   },
@@ -250,24 +250,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statValue: {
-    color: '#00ff88',
+    color: '#4b5563',
     fontSize: 24,
     fontWeight: '600',
     marginBottom: 4,
   },
   statLabel: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 13,
   },
   timelineCard: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
   },
   timelineTitle: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   timelineHourBar: {
     width: '100%',
     height: 160,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#e5e7eb',
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 8,
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   timelineHourLabel: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 10,
     fontWeight: '500',
   },

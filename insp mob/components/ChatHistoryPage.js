@@ -72,7 +72,7 @@ const ChatHistoryPage = ({ onBack, onRestoreConversation }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chat History</Text>
         <View style={styles.backButton} />
@@ -129,17 +129,17 @@ const ChatHistoryPage = ({ onBack, onRestoreConversation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f3f4f6',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 60,
+    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   backButton: {
     width: 40,
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 0.5,
   },
   content: {
@@ -164,14 +164,14 @@ const styles = StyleSheet.create({
     paddingVertical: 60,
   },
   emptyText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 16,
     fontWeight: '500',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 14,
     textAlign: 'center',
   },
@@ -179,11 +179,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   conversationCard: {
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#1a1a1a',
+    borderColor: 'rgba(15, 23, 42, 0.06)',
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -197,15 +197,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   conversationDate: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 12,
   },
   messageCount: {
-    color: '#606060',
+    color: '#9ca3af',
     fontSize: 12,
   },
   conversationPreview: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 14,
     lineHeight: 20,
   },

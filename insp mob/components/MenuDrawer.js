@@ -113,7 +113,7 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
           ]}
         >
           <LinearGradient
-            colors={['#0f0f0f', '#0a0a0a', '#050505']}
+            colors={['#f9fafb', '#f3f4f6', '#e5e7eb']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.drawerGradient}
@@ -148,9 +148,9 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
                       colors={
                         isActive
                           ? [
-                              'rgba(0, 255, 136, 0.2)',
-                              'rgba(0, 255, 136, 0.1)',
-                              'rgba(0, 255, 136, 0.05)',
+                              'rgba(107, 114, 128, 0.15)',
+                              'rgba(75, 85, 99, 0.1)',
+                              'rgba(55, 65, 81, 0.05)',
                             ]
                           : ['transparent', 'transparent']
                       }
@@ -161,7 +161,7 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
                       <Ionicons
                         name={item.icon}
                         size={24}
-                        color={isActive ? '#00ff88' : '#808080'}
+                        color={isActive ? '#4b5563' : '#9ca3af'}
                         style={styles.menuIcon}
                       />
                       <Text
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(15, 23, 42, 0.16)',
   },
   drawer: {
     position: 'absolute',
@@ -214,12 +214,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#111827',
     letterSpacing: 1,
   },
   closeButton: {
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
   },
   menuItemActive: {
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 136, 0.3)',
+    borderColor: 'rgba(107, 114, 128, 0.2)',
   },
   menuItemGradient: {
     flexDirection: 'row',
@@ -255,11 +255,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
-    color: '#808080',
+    color: '#4b5563',
     letterSpacing: 0.3,
   },
   menuLabelActive: {
-    color: '#00ff88',
+    color: '#4b5563',
   },
   activeIndicator: {
     position: 'absolute',
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#00ff88',
+    backgroundColor: '#6b7280',
   },
 });
 

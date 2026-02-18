@@ -57,12 +57,12 @@ const LoginScreen = ({ onLogin }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+      <StatusBar barStyle="dark-content" backgroundColor="#f3f4f6" />
       
       {/* Gradient Background Spots */}
       <View style={styles.gradientSpot1} pointerEvents="none">
         <LinearGradient
-          colors={['rgba(100, 100, 255, 0.1)', 'rgba(100, 100, 255, 0)', 'transparent']}
+          colors={['rgba(129, 140, 248, 0.22)', 'rgba(129, 140, 248, 0.06)', 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -70,7 +70,7 @@ const LoginScreen = ({ onLogin }) => {
       </View>
       <View style={styles.gradientSpot2} pointerEvents="none">
         <LinearGradient
-          colors={['rgba(150, 100, 200, 0.08)', 'rgba(150, 100, 200, 0)', 'transparent']}
+          colors={['rgba(244, 114, 182, 0.16)', 'rgba(244, 114, 182, 0.04)', 'transparent']}
           start={{ x: 1, y: 0 }}
           end={{ x: 0, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -208,7 +208,7 @@ const LoginScreen = ({ onLogin }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#f3f4f6',
   },
   gradientSpot1: {
     position: 'absolute',
@@ -242,16 +242,16 @@ const styles = StyleSheet.create({
   },
   logoText: {
     fontSize: 32,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#111827',
     letterSpacing: 3,
     marginBottom: 8,
   },
   tagline: {
     fontSize: 14,
-    color: '#808080',
+    color: '#6b7280',
     letterSpacing: 1,
-    fontWeight: '300',
+    fontWeight: '400',
   },
   formContainer: {
     width: '100%',
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#ffffff',
     borderRadius: 16,
     paddingHorizontal: 20,
     paddingVertical: 16,
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    color: '#e8e8e8',
+    color: '#111827',
     fontSize: 16,
     paddingVertical: 0,
   },
@@ -300,20 +300,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loginButtonText: {
-    color: '#FFFFFF',
+    color: '#111827',
     fontSize: 16,
     fontWeight: '500',
     letterSpacing: 0.5,
   },
   loginButtonTextDisabled: {
-    color: '#606060',
+    color: '#9ca3af',
   },
   forgotPassword: {
     marginTop: 24,
     alignItems: 'center',
   },
   forgotPasswordText: {
-    color: '#808080',
+    color: '#6b7280',
     fontSize: 14,
     fontWeight: '400',
   },
