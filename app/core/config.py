@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     
     # Video Processing Settings
     VIDEO_PREPROMPT: str = (
-        "this is a camera for a section of the library ; take not of every single individual person and detailed narration of their actions at all times ; also take not of each individuals clothing and appearance . leave you output in a structures json format"
+        "this is a camera for a library ; take not of every single individual person and detailed narration of their actions at all times ; also take not of each individuals clothing and appearance . leave you output in a structures json format"
     )
     VIDEO_CHUNK_DURATION: int = 600  # 10 minutes in seconds
     VIDEO_FPS: int = 2
