@@ -153,10 +153,71 @@ def _concat_segments(segment_paths: List[str], output_path: str) -> bool:
             list_file.unlink(missing_ok=True)
 
 
+def get_live_raw_segments_state() -> tuple[bool, int, int]:
+    """
+    Return whether there is an in-progress raw footage hour and how many
+    1-minute chunks have been recorded so far.
+    """
+    with _raw_segment_lock:
+        count = len(_raw_segment_paths)
+    return (count > 0, count, 60)
+
+
+def create_temp_raw_concat_for_query() -> str | None:
+    """
+    Create a temporary concatenated MP4 from all current in-progress raw
+    segments, upload it to R2 under a short-lived key, and schedule cleanup.
+    Returns the public URL or None if no segments are available.
+    """
+    from datetime import datetime
+
+    with _raw_segment_lock:
+        segments = list(_raw_segment_paths)
+
+    if not segments:
+        return None
+
+    settings = get_settings()
+    footage_dir = Path(settings.RAW_FOOTAGE_DIR)
+    footage_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp_path = footage_dir / f"temp_query_{ts}.mp4"
+
+    if not _concat_segments(segments, str(tmp_path)):
+        logger.error("Temp concat for raw query failed")
+        return None
+
+    try:
+        r2 = get_r2_uploader()
+    except Exception as e:
+        logger.error(f"R2 uploader not available for temp raw concat: {e}")
+        return None
+
+    object_key = f"raw_temp/{tmp_path.name}"
+    public_url = r2.upload_file(str(tmp_path), object_key=object_key)
+
+    def _cleanup() -> None:
+        try:
+            r2.delete_file(object_key)
+        except Exception as e:
+            logger.warning(f"Failed to delete temp raw object {object_key}: {e}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=_cleanup, daemon=True, name="RawTempCleanup").start()
+    return public_url
+
+
 def raw_chunk_callback(chunk_path: str) -> None:
     """
-    Callback for raw recording: upload each 1-min segment to R2, accumulate;
-    when 60 segments, concatenate into one video, save to footage dir, upload to R2, clear list.
+    Callback for raw recording:
+    - Collect each 1‑min motion-triggered chunk on disk
+    - When 60 chunks are available, concatenate them into a 1‑hour file
+    - Upload only the concatenated 1‑hour file to R2
+    - Delete the source chunks after concat
     """
 
     def do_raw_processing():
@@ -164,18 +225,6 @@ def raw_chunk_callback(chunk_path: str) -> None:
         settings = get_settings()
         footage_dir = Path(settings.RAW_FOOTAGE_DIR)
         footage_dir.mkdir(parents=True, exist_ok=True)
-
-        # Upload this 1-min segment to R2 (so we have incremental uploads)
-        try:
-            r2 = get_r2_uploader()
-            from datetime import datetime
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            seg_name = Path(chunk_path).name
-            object_key = f"raw_segments/{ts}_{seg_name}"
-            r2.upload_file(chunk_path, object_key=object_key)
-            logger.info(f"Raw segment uploaded: {object_key}")
-        except Exception as e:
-            logger.warning(f"Raw segment upload failed (non-fatal): {e}")
 
         to_concat: List[str] = []
         with _raw_segment_lock:

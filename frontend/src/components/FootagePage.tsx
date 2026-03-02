@@ -72,10 +72,12 @@ export function FootagePage({
       }
       return next;
     });
-    setActiveChunkId(id);
+    setActiveChunkId(id === "__live__" ? null : id);
   };
 
   const playUrlForChunk = (item: RawFootageItem): string => {
+    // Live card is query-only; no direct playback URL
+    if (item.is_live) return "";
     const token = getAuthToken();
     // Always prefer backend streaming endpoint to avoid R2 CORS issues
     return `${API_BASE_URL}/raw/videos/${encodeURIComponent(item.filename)}${
@@ -310,29 +312,52 @@ export function FootagePage({
           </p>
         ) : (
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {chunks.map(c => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  toggleSelect(c.id);
-                  setActiveChunkId(c.id);
-                }}
-                className={`min-w-[120px] px-3 py-2 rounded-xl text-left transition-colors border ${
-                  selectedIds.has(c.id)
-                    ? "border-white bg-white/5 text-white"
-                    : "border-[#1a1a1a] bg-[#0b0b0b] text-gray-300 hover:border-[#2a2a2a]"
-                }`}
-              >
-                <div className="text-[11px] text-gray-500">{c.date}</div>
-                <div className="text-sm font-medium">{c.time}</div>
-                {c.size_bytes > 0 && (
-                  <div className="text-[11px] text-gray-500 mt-1">
-                    {(c.size_bytes / 1024 / 1024).toFixed(1)} MB
+            {chunks.map(c => {
+              const isSelected = selectedIds.has(c.id);
+              const isLive = !!c.is_live;
+              const progress =
+                isLive && c.segments_total
+                  ? Math.min(100, Math.round(((c.segments_done ?? 0) / c.segments_total) * 100))
+                  : 0;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => toggleSelect(c.id)}
+                  className={`relative min-w-[120px] px-3 py-2 rounded-xl text-left transition-colors border ${
+                    isSelected
+                      ? "border-white bg-white/5 text-white"
+                      : "border-[#1a1a1a] bg-[#0b0b0b] text-gray-300 hover:border-[#2a2a2a]"
+                  }`}
+                >
+                  <div className="text-[11px] text-gray-500 flex items-center gap-1">
+                    {isLive && (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-green-400 uppercase tracking-wide">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                        Live
+                      </span>
+                    )}
+                    {!isLive && c.date}
                   </div>
-                )}
-              </button>
-            ))}
+                  <div className="text-sm font-medium">
+                    {isLive ? c.time : c.time}
+                  </div>
+                  {c.size_bytes > 0 && !isLive && (
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      {(c.size_bytes / 1024 / 1024).toFixed(1)} MB
+                    </div>
+                  )}
+                  {isLive && (
+                    <div className="mt-2 h-1 w-full rounded-full bg-[#1a1a1a] overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-green-400 to-emerald-500 rounded-full transition-all duration-300"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

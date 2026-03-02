@@ -26,6 +26,7 @@ import {
   searchApi, 
   analysisApi, 
   searchApiExtended,
+  authApi,
   getAuthToken, 
   getTunnelUrl, 
   setTunnelUrl, 
@@ -37,6 +38,7 @@ import MenuDrawer from './components/MenuDrawer';
 import AlertsPage from './components/AlertsPage';
 import ChatHistoryPage from './components/ChatHistoryPage';
 import ProcessingTimelinePage from './components/ProcessingTimelinePage';
+import RawFootagePage from './components/RawFootagePage';
 import DateFilterModal from './components/DateFilterModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -302,7 +304,7 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [showVideoOverlay, setShowVideoOverlay] = useState(false);
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
-  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'alerts', 'history', 'timeline'
+  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'alerts', 'history', 'timeline', 'rawFootage'
   const [timeFilter, setTimeFilter] = useState('Last 24 hours');
   const [selectedDate, setSelectedDate] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
@@ -332,12 +334,19 @@ export default function App() {
       });
       
       if (response.ok) {
-        // Connection successful, check if logged in
+        // Connection successful, validate token if present
         const token = await getAuthToken();
         if (token) {
-          setIsLoggedIn(true);
+          try {
+            await authApi.getCurrentUser();
+            setIsLoggedIn(true);
+          } catch (error) {
+            console.log('Stored token invalid, clearing:', error?.message);
+            await removeAuthToken();
+            setIsLoggedIn(false);
+          }
         }
-        // If not logged in, will show login screen
+        // If no token or invalid token, login screen will be shown
       } else {
         // Connection failed, ask to rescan
         setShowQRScanner(true);
@@ -368,10 +377,17 @@ export default function App() {
         // Connection successful, close scanner
         setShowQRScanner(false);
         
-        // Check if user is already logged in
+        // Check if user is already logged in and token is valid
         const token = await getAuthToken();
         if (token) {
-          setIsLoggedIn(true);
+          try {
+            await authApi.getCurrentUser();
+            setIsLoggedIn(true);
+          } catch (error) {
+            console.log('Stored token invalid after scan, clearing:', error?.message);
+            await removeAuthToken();
+            setIsLoggedIn(false);
+          }
         }
         // If not logged in, will show login screen
       } else {
@@ -738,6 +754,27 @@ export default function App() {
     return (
       <>
         <ProcessingTimelinePage
+          onBack={() => {
+            setCurrentPage('chat');
+            saveChatHistory();
+          }}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentPage === 'rawFootage') {
+    return (
+      <>
+        <RawFootagePage
           onBack={() => {
             setCurrentPage('chat');
             saveChatHistory();

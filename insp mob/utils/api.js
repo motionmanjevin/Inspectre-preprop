@@ -281,6 +281,29 @@ export const searchApiExtended = {
 };
 
 /**
+ * Raw footage API
+ */
+export const rawFootageApi = {
+  /**
+   * List raw footage chunks (including live in-progress hour when available)
+   */
+  async list() {
+    return apiRequest('/raw/footage');
+  },
+
+  /**
+   * Run analysis on 1 or 2 selected raw chunks.
+   * Pass "__live__" as a chunk id to analyze the current in-progress hour.
+   */
+  async queryChunks(query, chunkIds) {
+    return apiRequest('/raw', {
+      method: 'POST',
+      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
+  },
+};
+
+/**
  * Alerts API
  */
 export const alertsApi = {

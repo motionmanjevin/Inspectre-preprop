@@ -1,6 +1,7 @@
 """Raw footage API: list 1-hour chunks, serve video, query selected chunks with Qwen VL."""
 import logging
 from pathlib import Path
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import FileResponse
@@ -12,6 +13,7 @@ from app.services.auth_service import AuthService
 from app.services.qwen_client import QwenVLClient
 from app.api.models.responses import AnalysisResult, AnalysisResponse
 from app.utils.exceptions import QwenAPIError
+from app.main import get_live_raw_segments_state, create_temp_raw_concat_for_query
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,9 @@ class RawFootageItem(BaseModel):
     time: str = Field(..., description="Time HH:MM:SS from filename")
     size_bytes: int = Field(0, description="File size in bytes")
     video_url: str = Field(..., description="R2 public URL for playback/analysis")
+    is_live: bool = Field(False, description="Whether this item represents the current in-progress hour")
+    segments_done: int = Field(0, description="Number of 1-minute segments recorded so far (for live item)")
+    segments_total: int = Field(60, description="Total segments per hour (typically 60)")
 
 
 class RawFootageListResponse(BaseModel):
@@ -89,6 +94,25 @@ async def list_footage(
             )
         )
 
+    # Optionally include a synthetic "live" item for the in-progress hour
+    has_live, seg_done, seg_total = get_live_raw_segments_state()
+    if has_live:
+        now = datetime.utcnow()
+        items.insert(
+            0,
+            RawFootageItem(
+                id="__live__",
+                filename="__live__",
+                date=now.date().isoformat(),
+                time=now.strftime("%H:%M:%S"),
+                size_bytes=0,
+                video_url="",
+                is_live=True,
+                segments_done=seg_done,
+                segments_total=seg_total,
+            ),
+        )
+
     return RawFootageListResponse(chunks=items)
 
 
@@ -149,11 +173,26 @@ async def query_footage_chunks(
     footage_dir = Path(settings.RAW_FOOTAGE_DIR)
 
     for chunk_id in request.chunk_ids:
-        # Resolve to R2 URL (preferred for Qwen) or local path
-        video_url = _r2_url_for_footage(chunk_id)
-        if not video_url and settings.R2_PUBLIC_URL_BASE:
-            video_url = f"{settings.R2_PUBLIC_URL_BASE.rstrip('/')}/raw_footage/{chunk_id}"
-        local_path = footage_dir / chunk_id if (footage_dir / chunk_id).exists() else None
+        # Special handling for in-progress hour: synthesize a temporary concat and upload
+        if chunk_id == "__live__":
+            video_url = create_temp_raw_concat_for_query()
+            local_path = None
+            if not video_url:
+                results.append(
+                    AnalysisResult(
+                        video_url="",
+                        local_path=None,
+                        analysis=None,
+                        error="No raw footage available yet for live hour.",
+                    )
+                )
+                continue
+        else:
+            # Resolve to R2 URL (preferred for Qwen) or local path
+            video_url = _r2_url_for_footage(chunk_id)
+            if not video_url and settings.R2_PUBLIC_URL_BASE:
+                video_url = f"{settings.R2_PUBLIC_URL_BASE.rstrip('/')}/raw_footage/{chunk_id}"
+            local_path = footage_dir / chunk_id if (footage_dir / chunk_id).exists() else None
 
         try:
             analysis_output = qwen_client.analyze_video_flash(

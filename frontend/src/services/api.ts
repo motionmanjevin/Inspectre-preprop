@@ -350,6 +350,9 @@ export interface RawFootageItem {
   time: string;
   size_bytes: number;
   video_url: string;
+  is_live?: boolean;
+  segments_done?: number;
+  segments_total?: number;
 }
 
 export interface RawFootageListResponse {
@@ -363,6 +366,7 @@ export const rawFootageApi = {
 
   /**
    * Run analysis on 1 or 2 selected raw chunks (Qwen VL Flash).
+   * Pass "__live__" as a chunk id to analyze the current in-progress hour.
    */
   async queryChunks(query: string, chunkIds: string[]): Promise<AnalysisResponse> {
     return apiRequest<AnalysisResponse>('/raw', {

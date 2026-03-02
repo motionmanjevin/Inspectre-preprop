@@ -60,6 +60,12 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
       page: 'chat',
     },
     {
+      id: 'rawFootage',
+      label: 'Raw Footage',
+      icon: 'film-outline',
+      page: 'rawFootage',
+    },
+    {
       id: 'alerts',
       label: 'Alerts',
       icon: 'notifications-outline',
