@@ -9,6 +9,7 @@ export function SettingsPage() {
   const [chunkDuration, setChunkDuration] = useState(10); // Default 10 minutes
   const [motionDetectionEnabled, setMotionDetectionEnabled] = useState(false);
   const [motionThreshold, setMotionThreshold] = useState(0.3); // Default 0.3 (30%)
+  const [rawMode, setRawMode] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
@@ -27,6 +28,7 @@ export function SettingsPage() {
         setChunkDuration(settings.chunkDuration || 10);
         setMotionDetectionEnabled(settings.motionDetectionEnabled || false);
         setMotionThreshold(settings.motionThreshold || 0.3);
+        setRawMode(settings.rawMode || false);
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -73,7 +75,8 @@ export function SettingsPage() {
       systemPrompt,
       chunkDuration,
       motionDetectionEnabled,
-      motionThreshold
+      motionThreshold,
+      rawMode
     };
     localStorage.setItem('inspectre_settings', JSON.stringify(settings));
     showStatus('success', 'Settings saved successfully');
@@ -94,10 +97,11 @@ export function SettingsPage() {
         showStatus('success', 'Recording stopped');
       } else {
         // Start recording with chunk duration and motion detection settings
-        await recordingApi.start(rtspLink, chunkDuration, motionDetectionEnabled, motionThreshold);
+        await recordingApi.start(rtspLink, chunkDuration, motionDetectionEnabled, motionThreshold, rawMode);
         setIsDetecting(true);
-        const motionText = motionDetectionEnabled ? ` (motion detection: ${(motionThreshold * 100).toFixed(0)}%)` : '';
-        showStatus('success', `Recording started (${chunkDuration} min chunks${motionText})`);
+        const motionText = motionDetectionEnabled ? ` (motion: ${(motionThreshold * 100).toFixed(0)}%)` : '';
+        const rawText = rawMode ? ' raw 1‑hour footage' : '';
+        showStatus('success', `Recording started${rawText || ` (${chunkDuration} min chunks${motionText})`}`);
       }
     } catch (error) {
       console.error('Toggle detection error:', error);
@@ -253,7 +257,39 @@ export function SettingsPage() {
             </div>
           </div>
 
-          {/* Motion Detection Toggle */}
+          {/* Raw Recording Toggle */}
+          <div className="space-y-2">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <label className="block text-white text-sm font-medium mb-1">
+                  Raw recording
+                </label>
+                <p className="text-gray-500 text-sm">
+                  Record 1‑hour chunks only (no AI processing). 1‑min segments upload to bucket; then merged into one file. Use the Footage page to play and query.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRawMode(!rawMode)}
+                disabled={isDetecting}
+                className={`relative flex-shrink-0 h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-[#0a0a0a] disabled:opacity-50 disabled:cursor-not-allowed ${
+                  rawMode ? 'bg-[#00ff88]' : 'bg-gray-600'
+                }`}
+                aria-label="Toggle raw recording"
+                aria-checked={rawMode}
+              >
+                <span
+                  className={`absolute inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 ease-in-out ${
+                    rawMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                  style={{ top: '2px' }}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* Motion Detection Toggle (hidden when raw mode) */}
+          {!rawMode && (
           <div className="space-y-2">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
@@ -261,7 +297,7 @@ export function SettingsPage() {
                   Capture Only on Motion
                 </label>
                 <p className="text-gray-500 text-sm">
-                  Only record video chunks when motion is detected (uses background subtraction)
+                  Only record video chunks when motion is detected (uses frame differencing)
                 </p>
               </div>
               <button
@@ -333,6 +369,7 @@ export function SettingsPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Camera Name Input */}
           <div className="space-y-2">

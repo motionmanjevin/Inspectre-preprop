@@ -1,4 +1,4 @@
-import { X, Settings, Home, RefreshCw, Archive, LogOut, Smartphone } from "lucide-react";
+import { X, Settings, Home, RefreshCw, Archive, LogOut, Smartphone, Film } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { searchApi, recordingApi, tunnelApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
@@ -7,7 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onNavigate: (page: "chat" | "settings" | "archives") => void;
+  onNavigate: (page: "chat" | "settings" | "archives" | "footage") => void;
   onRefreshChat: () => void;
   onLogout: () => void;
 }) {
@@ -161,8 +161,9 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
           )}
         </div>
 
-        {/* Connect to Mobile - main section */}
-        <div className="p-4 border-b border-[#1a1a1a]">
+        {/* Main actions section */}
+        <div className="p-4 border-b border-[#1a1a1a] space-y-3">
+          {/* Connect to Mobile */}
           <button
             onClick={handleConnectMobile}
             className="w-full flex items-center gap-3 p-4 hover:bg-[#1a1a1a] rounded-lg transition-colors border border-[#1a1a1a] hover:border-[#2a2a2a]"
@@ -174,6 +175,21 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
             <div className="flex-1 text-left">
               <span className="text-sm font-medium text-white block">Connect to Mobile</span>
               <span className="text-xs text-gray-500">Scan QR code to pair device</span>
+            </div>
+          </button>
+
+          {/* Raw Footage */}
+          <button
+            onClick={() => onNavigate("footage")}
+            className="w-full flex items-center gap-3 p-4 hover:bg-[#1a1a1a] rounded-lg transition-colors border border-[#1a1a1a] hover:border-[#2a2a2a]"
+            title="Raw footage"
+          >
+            <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[#1a1a1a]">
+              <Film className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="flex-1 text-left">
+              <span className="text-sm font-medium text-white block">Raw Footage</span>
+              <span className="text-xs text-gray-500">Browse and query continuous recordings</span>
             </div>
           </button>
         </div>

@@ -20,6 +20,7 @@ router = APIRouter(prefix="/recording", tags=["recording"])
 
 # Global recorder instance (in production, use dependency injection)
 _video_recorder: Optional[VideoRecorder] = None
+_raw_recording_active: bool = False
 
 
 def get_video_recorder() -> Optional[VideoRecorder]:
@@ -44,7 +45,7 @@ async def start_recording(
     Raises:
         HTTPException: If recording fails to start
     """
-    global _video_recorder
+    global _video_recorder, _raw_recording_active
     
     if _video_recorder and _video_recorder.is_recording:
         raise HTTPException(
@@ -54,27 +55,40 @@ async def start_recording(
     
     try:
         settings = get_settings()
-        # Use request chunk_duration if provided (in minutes), convert to seconds
-        # Otherwise use default from settings (already in seconds)
-        if request.chunk_duration:
-            chunk_duration_seconds = request.chunk_duration * 60  # Convert minutes to seconds
+        raw_mode = request.raw_mode or False
+
+        if raw_mode:
+            # Raw recording: 1-min segments, footage dir, no motion, callback uploads segments and concats every 60
+            output_dir = settings.RAW_FOOTAGE_DIR
+            chunk_duration_seconds = 60  # 1 minute per segment
+            motion_detection_enabled = False
+            motion_threshold = 0.3
+            from app.main import raw_chunk_callback
+            callback = raw_chunk_callback
+            _raw_recording_active = True
         else:
-            chunk_duration_seconds = settings.VIDEO_CHUNK_DURATION
-        
+            output_dir = settings.RECORDINGS_DIR
+            if request.chunk_duration:
+                chunk_duration_seconds = request.chunk_duration * 60
+            else:
+                chunk_duration_seconds = settings.VIDEO_CHUNK_DURATION
+            motion_detection_enabled = request.motion_detection_enabled or False
+            motion_threshold = request.motion_threshold or 0.3
+            from app.main import chunk_callback
+            callback = chunk_callback
+            _raw_recording_active = False
+
         _video_recorder = VideoRecorder(
             rtsp_url=request.rtsp_url,
-            output_dir=settings.RECORDINGS_DIR,
+            output_dir=output_dir,
             chunk_duration=chunk_duration_seconds,
-            motion_detection_enabled=request.motion_detection_enabled or False,
-            motion_threshold=request.motion_threshold or 0.3
+            motion_detection_enabled=motion_detection_enabled,
+            motion_threshold=motion_threshold
         )
         
-        # Get callback from main module
-        # This avoids circular imports by importing at function level
-        from app.main import chunk_callback
-        _video_recorder.start_recording(callback=chunk_callback)
+        _video_recorder.start_recording(callback=callback)
         
-        logger.info(f"Recording started for {request.rtsp_url}")
+        logger.info(f"Recording started for {request.rtsp_url}" + (" (raw footage)" if raw_mode else ""))
         return RecordingResponse(
             status="recording_started",
             rtsp_url=request.rtsp_url
@@ -115,8 +129,14 @@ async def stop_recording(
         )
     
     try:
+        global _raw_recording_active
         rtsp_url = _video_recorder.rtsp_url
+        was_raw = _raw_recording_active
         _video_recorder.stop_recording()
+        _raw_recording_active = False
+        if was_raw:
+            from app.main import flush_raw_segments
+            flush_raw_segments()
         logger.info("Recording stopped")
         return RecordingResponse(
             status="recording_stopped",

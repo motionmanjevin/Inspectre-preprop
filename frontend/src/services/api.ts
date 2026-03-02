@@ -2,7 +2,7 @@
  * API service for communicating with the Inspectre backend.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
  * API Response types matching the backend models
@@ -143,18 +143,20 @@ export const recordingApi = {
    * @param motionThreshold Motion detection threshold (0.0-1.0)
    */
   async start(
-    rtspUrl: string, 
+    rtspUrl: string,
     chunkDuration?: number,
     motionDetectionEnabled?: boolean,
-    motionThreshold?: number
+    motionThreshold?: number,
+    rawMode?: boolean
   ): Promise<{ status: string; rtsp_url: string }> {
     return apiRequest('/recording/start', {
       method: 'POST',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         rtsp_url: rtspUrl,
         chunk_duration: chunkDuration || null,
         motion_detection_enabled: motionDetectionEnabled || false,
         motion_threshold: motionThreshold || 0.3,
+        raw_mode: rawMode || false,
       }),
     });
   },
@@ -335,6 +337,38 @@ export const tunnelApi = {
    */
   async getUrl(): Promise<TunnelUrlResponse> {
     return apiRequest<TunnelUrlResponse>('/tunnel/url');
+  },
+};
+
+/**
+ * Raw footage API (1-hour chunks, no ChromaDB processing)
+ */
+export interface RawFootageItem {
+  id: string;
+  filename: string;
+  date: string;
+  time: string;
+  size_bytes: number;
+  video_url: string;
+}
+
+export interface RawFootageListResponse {
+  chunks: RawFootageItem[];
+}
+
+export const rawFootageApi = {
+  async list(): Promise<RawFootageListResponse> {
+    return apiRequest<RawFootageListResponse>('/raw/footage');
+  },
+
+  /**
+   * Run analysis on 1 or 2 selected raw chunks (Qwen VL Flash).
+   */
+  async queryChunks(query: string, chunkIds: string[]): Promise<AnalysisResponse> {
+    return apiRequest<AnalysisResponse>('/raw', {
+      method: 'POST',
+      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
   },
 };
 

@@ -23,6 +23,10 @@ class StartRecordingRequest(BaseModel):
         le=1.0,
         description="Motion detection threshold (0.0-1.0). Higher values require more motion to trigger recording."
     )
+    raw_mode: Optional[bool] = Field(
+        False,
+        description="If True, record raw footage only: 1-minute segments uploaded to R2, then concatenated into 1-hour files in footage folder. No ChromaDB or Qwen processing."
+    )
 
 
 class QueryRequest(BaseModel):

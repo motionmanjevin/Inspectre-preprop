@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     
     # Storage Settings
     RECORDINGS_DIR: str = "recordings"
+    RAW_FOOTAGE_DIR: str = "footage"  # Raw recording 1-hour chunks (no processing)
     CHROMA_DB_DIR: str = "./chroma_db"
     CHROMA_COLLECTION_NAME: str = "video_analysis"
     

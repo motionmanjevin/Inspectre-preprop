@@ -1,7 +1,9 @@
 """Main FastAPI application."""
 import logging
+import subprocess
 import threading
-from typing import Optional
+from pathlib import Path
+from typing import Optional, List
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +43,7 @@ app.add_middleware(
 )
 
 # Include routers (import recording after chunk_callback is defined)
-from app.api.routes import recording, videos, alerts, auth, tunnel
+from app.api.routes import recording, videos, alerts, auth, tunnel, raw_footage
 
 app.include_router(health.router)  # Public endpoint
 app.include_router(auth.router)  # Public endpoints (register/login)
@@ -51,6 +53,7 @@ app.include_router(analysis.router)
 app.include_router(videos.router)
 app.include_router(alerts.router)
 app.include_router(tunnel.router)
+app.include_router(raw_footage.router)
 
 # Initialize services (singleton pattern)
 _qwen_client: Optional[QwenVLClient] = None
@@ -118,6 +121,131 @@ def get_tunnel_manager() -> TunnelManager:
 
 # Set tunnel manager getter (after get_tunnel_manager is defined)
 tunnel.set_tunnel_manager_getter(get_tunnel_manager)
+
+# Raw footage: accumulate 1-min segments, concat every 60 into one hour file
+_raw_segment_lock = threading.Lock()
+_raw_segment_paths: List[str] = []
+
+
+def _concat_segments(segment_paths: List[str], output_path: str) -> bool:
+    """Concatenate MP4 segments into one file using FFmpeg concat demuxer."""
+    if len(segment_paths) < 1:
+        return False
+    list_file = Path(output_path).with_suffix(".concat_list.txt")
+    try:
+        # FFmpeg concat demuxer expects lines: file 'path' (escape single quotes in path)
+        with open(list_file, "w", encoding="utf-8") as f:
+            for p in sorted(segment_paths):
+                path_str = Path(p).resolve().as_posix().replace("'", "'\\''")
+                f.write(f"file '{path_str}'\n")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-c", "copy", str(output_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error(f"FFmpeg concat failed: {result.stderr}")
+            return False
+        return Path(output_path).exists() and Path(output_path).stat().st_size > 0
+    finally:
+        if list_file.exists():
+            list_file.unlink(missing_ok=True)
+
+
+def raw_chunk_callback(chunk_path: str) -> None:
+    """
+    Callback for raw recording: upload each 1-min segment to R2, accumulate;
+    when 60 segments, concatenate into one video, save to footage dir, upload to R2, clear list.
+    """
+
+    def do_raw_processing():
+        global _raw_segment_paths
+        settings = get_settings()
+        footage_dir = Path(settings.RAW_FOOTAGE_DIR)
+        footage_dir.mkdir(parents=True, exist_ok=True)
+
+        # Upload this 1-min segment to R2 (so we have incremental uploads)
+        try:
+            r2 = get_r2_uploader()
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            seg_name = Path(chunk_path).name
+            object_key = f"raw_segments/{ts}_{seg_name}"
+            r2.upload_file(chunk_path, object_key=object_key)
+            logger.info(f"Raw segment uploaded: {object_key}")
+        except Exception as e:
+            logger.warning(f"Raw segment upload failed (non-fatal): {e}")
+
+        to_concat: List[str] = []
+        with _raw_segment_lock:
+            _raw_segment_paths.append(chunk_path)
+            if len(_raw_segment_paths) >= 60:
+                to_concat = _raw_segment_paths[:60]
+                _raw_segment_paths = _raw_segment_paths[60:]
+
+        if not to_concat:
+            return
+
+        # Concat 60 segments into one file
+        first_mtime = min(Path(p).stat().st_mtime for p in to_concat)
+        from datetime import datetime
+        dt = datetime.fromtimestamp(first_mtime)
+        out_name = f"footage_{dt.strftime('%Y%m%d_%H%M%S')}.mp4"
+        out_path = footage_dir / out_name
+        if not _concat_segments(to_concat, str(out_path)):
+            logger.error(f"Raw footage concat failed for {out_name}")
+            return
+        logger.info(f"Raw footage concatenated: {out_path}")
+
+        # Upload the 1-hour file to R2 for playback/query
+        try:
+            r2 = get_r2_uploader()
+            object_key = f"raw_footage/{out_name}"
+            r2.upload_file(str(out_path), object_key=object_key)
+            logger.info(f"Raw footage uploaded: {object_key}")
+        except Exception as e:
+            logger.warning(f"Raw footage upload failed: {e}")
+
+        # Delete the 60 segment files to free space
+        for p in to_concat:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception as e:
+                logger.debug(f"Could not delete segment {p}: {e}")
+
+    thread = threading.Thread(target=do_raw_processing, daemon=True, name="RawChunkProcessor")
+    thread.start()
+
+
+def flush_raw_segments() -> None:
+    """When raw recording stops, concat any remaining segments (1–59) into one partial file."""
+    global _raw_segment_paths
+    with _raw_segment_lock:
+        to_concat = list(_raw_segment_paths)
+        _raw_segment_paths = []
+    if not to_concat:
+        return
+    settings = get_settings()
+    footage_dir = Path(settings.RAW_FOOTAGE_DIR)
+    footage_dir.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime
+    first_mtime = min(Path(p).stat().st_mtime for p in to_concat)
+    dt = datetime.fromtimestamp(first_mtime)
+    out_name = f"footage_{dt.strftime('%Y%m%d_%H%M%S')}_partial.mp4"
+    out_path = footage_dir / out_name
+    if _concat_segments(to_concat, str(out_path)):
+        logger.info(f"Raw footage partial concatenated: {out_path}")
+        try:
+            r2 = get_r2_uploader()
+            r2.upload_file(str(out_path), object_key=f"raw_footage/{out_name}")
+        except Exception as e:
+            logger.warning(f"Raw partial upload failed: {e}")
+        for p in to_concat:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def chunk_callback(chunk_path: str) -> None:

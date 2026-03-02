@@ -2,6 +2,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ChatPage } from "./components/ChatPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { ArchivesPage, ArchivedConversation } from "./components/ArchivesPage";
+import { FootagePage } from "./components/FootagePage";
 import { LoginPage } from "./components/LoginPage";
 import { RegisterPage } from "./components/RegisterPage";
 import { useState, useRef, useEffect } from "react";
@@ -11,7 +12,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState<"chat" | "settings" | "archives">("chat");
+  const [currentPage, setCurrentPage] = useState<"chat" | "settings" | "archives" | "footage">("chat");
   const [archives, setArchives] = useState<ArchivedConversation[]>([]);
   const chatPageRef = useRef<{ clearMessages: () => void; getMessages: () => any[]; restoreMessages: (messages: any[]) => void }>(null);
 
@@ -90,6 +91,32 @@ export default function App() {
     setSidebarOpen(false);
   };
 
+  const handleArchiveFromFootage = (userText: string, botText: string) => {
+    const now = new Date();
+    const baseId = now.getTime();
+    const messages = [
+      {
+        id: String(baseId),
+        text: userText,
+        sender: "user" as const,
+        timestamp: now,
+      },
+      {
+        id: String(baseId + 1),
+        text: botText,
+        sender: "bot" as const,
+        timestamp: now,
+      },
+    ];
+    const newArchive: ArchivedConversation = {
+      id: `footage-${baseId}`,
+      messages,
+      archivedAt: now,
+      preview: userText.substring(0, 100),
+    };
+    setArchives(prev => [newArchive, ...prev]);
+  };
+
   const handleLogin = () => {
     setIsAuthenticated(true);
     setShowRegister(false);
@@ -133,6 +160,9 @@ export default function App() {
               onDeleteArchive={handleDeleteArchive}
               onRestoreArchive={handleRestoreArchive}
             />
+          )}
+          {currentPage === "footage" && (
+            <FootagePage onArchive={handleArchiveFromFootage} />
           )}
         </div>
       </main>
