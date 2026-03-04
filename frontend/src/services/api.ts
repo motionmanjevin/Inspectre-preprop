@@ -31,6 +31,22 @@ export interface AnalysisResponse {
   query: string;
 }
 
+export interface RawFootageJobCreateResponse {
+  job_id: string;
+  total_chunks: number;
+}
+
+export type RawFootageJobStatusType = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface RawFootageJobStatus {
+  job_id: string;
+  status: RawFootageJobStatusType;
+  total_chunks: number;
+  completed_chunks: number;
+  results: AnalysisResult[];
+  error?: string | null;
+}
+
 export interface RecordingStatus {
   recording: boolean;
   rtsp_url: string | null;
@@ -365,13 +381,39 @@ export const rawFootageApi = {
   },
 
   /**
-   * Run analysis on 1 or 2 selected raw chunks (Qwen VL Flash).
-   * Pass "__live__" as a chunk id to analyze the current in-progress hour.
+   * Legacy one-shot query for selected raw chunks (waits for all to finish).
    */
   async queryChunks(query: string, chunkIds: string[]): Promise<AnalysisResponse> {
     return apiRequest<AnalysisResponse>('/raw', {
       method: 'POST',
       body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
+  },
+
+  /**
+   * Start an incremental raw footage analysis job that processes chunks sequentially.
+   */
+  async startJob(query: string, chunkIds: string[]): Promise<RawFootageJobCreateResponse> {
+    return apiRequest<RawFootageJobCreateResponse>('/raw/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
+  },
+
+  /**
+   * Get current status and partial results for a raw footage analysis job.
+   */
+  async getJob(jobId: string): Promise<RawFootageJobStatus> {
+    return apiRequest<RawFootageJobStatus>(`/raw/jobs/${encodeURIComponent(jobId)}`);
+  },
+
+  /**
+   * Cleanup temporary raw query concats on the backend.
+   * Call this when the user refreshes/leaves the raw footage page.
+   */
+  async cleanupTemp(): Promise<{ status: string; cleaned: number }> {
+    return apiRequest<{ status: string; cleaned: number }>('/raw/cleanup-temp', {
+      method: 'POST',
     });
   },
 };

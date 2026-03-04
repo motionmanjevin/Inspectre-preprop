@@ -166,10 +166,8 @@ const parseTimestamps = (text) => {
 // Video Overlay Modal Component
 const VideoOverlay = ({ visible, onClose, videoData }) => {
   const videoRef = useRef(null);
-  
-  if (!visible) return null;
-
   const timestamps = videoData?.timestamps || [];
+  const initialSeekSeconds = videoData?.initialSeekSeconds ?? null;
 
   const handleSeek = async (seconds) => {
     try {
@@ -192,6 +190,17 @@ const VideoOverlay = ({ visible, onClose, videoData }) => {
       }
     }
   };
+
+  // If an initial seek time is provided (e.g. from raw footage page),
+  // perform a one-time seek when the overlay is shown.
+  useEffect(() => {
+    if (visible && initialSeekSeconds != null) {
+      handleSeek(initialSeekSeconds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, initialSeekSeconds]);
+
+  if (!visible) return null;
 
   return (
     <Modal
@@ -775,10 +784,21 @@ export default function App() {
     return (
       <>
         <RawFootagePage
-          onBack={() => {
+          onBack={async () => {
+            try {
+              await rawFootageApi.cleanupTemp();
+            } catch (e) {
+              console.warn('Failed to cleanup temp raw queries on back:', e?.message || e);
+            }
             setCurrentPage('chat');
             saveChatHistory();
           }}
+          onOpenVideo={(videoData) => handleVideoPress(videoData)}
+        />
+        <VideoOverlay
+          visible={showVideoOverlay}
+          onClose={closeVideoOverlay}
+          videoData={selectedVideo}
         />
         {isLoggedIn && (
           <MenuDrawer

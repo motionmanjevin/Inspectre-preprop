@@ -126,6 +126,10 @@ tunnel.set_tunnel_manager_getter(get_tunnel_manager)
 _raw_segment_lock = threading.Lock()
 _raw_segment_paths: List[str] = []
 
+# Temporary raw query concats (live footage queries)
+_temp_raw_lock = threading.Lock()
+_temp_raw_entries: List[tuple[Path, str]] = []
+
 
 def _concat_segments(segment_paths: List[str], output_path: str) -> bool:
     """Concatenate MP4 segments into one file using FFmpeg concat demuxer."""
@@ -197,18 +201,44 @@ def create_temp_raw_concat_for_query() -> str | None:
     object_key = f"raw_temp/{tmp_path.name}"
     public_url = r2.upload_file(str(tmp_path), object_key=object_key)
 
-    def _cleanup() -> None:
-        try:
-            r2.delete_file(object_key)
-        except Exception as e:
-            logger.warning(f"Failed to delete temp raw object {object_key}: {e}")
+    # Track this temp object for explicit cleanup when the user refreshes/leaves
+    with _temp_raw_lock:
+        _temp_raw_entries.append((tmp_path, object_key))
+
+    return public_url
+
+
+def cleanup_temp_raw_queries() -> int:
+    """
+    Delete all temporary raw query concats from R2 and local disk.
+    Returns the number of entries cleaned up.
+    """
+    try:
+        r2 = get_r2_uploader()
+    except Exception as e:
+        logger.error(f"R2 uploader not available for temp raw cleanup: {e}")
+        r2 = None
+
+    with _temp_raw_lock:
+        entries = list(_temp_raw_entries)
+        _temp_raw_entries.clear()
+
+    cleaned = 0
+    for tmp_path, object_key in entries:
+        if r2 is not None:
+            try:
+                r2.delete_file(object_key)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp raw object {object_key}: {e}")
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
             pass
+        cleaned += 1
 
-    threading.Thread(target=_cleanup, daemon=True, name="RawTempCleanup").start()
-    return public_url
+    if cleaned:
+        logger.info(f"Cleaned up {cleaned} temporary raw query concat(s)")
+    return cleaned
 
 
 def raw_chunk_callback(chunk_path: str) -> None:

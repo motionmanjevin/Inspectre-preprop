@@ -28,7 +28,9 @@ export function FootagePage({
   const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState<{ query: string; results: FootageAnalysisResult[] } | null>(null);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [jobProgress, setJobProgress] = useState<{ total: number; completed: number } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const pendingSeekRef = useRef<number | null>(null);
 
@@ -64,10 +66,7 @@ export function FootagePage({
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
-      } else if (next.size < 2) {
-        next.add(id);
       } else {
-        next.clear();
         next.add(id);
       }
       return next;
@@ -176,28 +175,50 @@ export function FootagePage({
     if (!query.trim() || selectedIds.size < 1) return;
     const trimmed = query.trim();
     setSubmitting(true);
+    setResponse(null);
+    setActiveResultIndex(0);
+    setJobProgress(null);
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
     try {
       const chunkIds = Array.from(selectedIds);
-      const res = await rawFootageApi.queryChunks(trimmed, chunkIds);
-      const resultsWithTimestamps: FootageAnalysisResult[] = res.results.map(r => ({
-        ...r,
-        timestamps: parseTimestamps(r.analysis),
-      }));
-      setResponse({ query: res.query, results: resultsWithTimestamps });
+      const start = await rawFootageApi.startJob(trimmed, chunkIds);
+      setJobProgress({ total: start.total_chunks, completed: 0 });
 
-      // Archive as a simple two-message conversation
-      if (onArchive) {
-        const botText =
-          resultsWithTimestamps.length === 0
-            ? "No analysis results."
-            : resultsWithTimestamps
-                .map((r, idx) => {
-                  const header = `Footage ${idx + 1} (${r.local_path || "unknown"}):`;
-                  const body = r.analysis || r.error || "No analysis available.";
-                  return `${header}\n${body}`;
-                })
-                .join("\n\n---\n\n");
-        onArchive(trimmed, botText);
+      let done = false;
+      while (!done) {
+        const status = await rawFootageApi.getJob(start.job_id);
+        const resultsWithTimestamps: FootageAnalysisResult[] = (status.results || []).map(r => ({
+          ...r,
+          timestamps: parseTimestamps(r.analysis),
+        }));
+        setResponse({ query: trimmed, results: resultsWithTimestamps });
+        setJobProgress({
+          total: status.total_chunks,
+          completed: status.completed_chunks,
+        });
+
+        if (status.status === "completed" || status.status === "failed") {
+          done = true;
+
+          // Archive once when job finishes
+          if (onArchive) {
+            const botText =
+              resultsWithTimestamps.length === 0
+                ? "No analysis results."
+                : resultsWithTimestamps
+                    .map((r, idx) => {
+                      const header = `Footage ${idx + 1} (${r.local_path || "unknown"}):`;
+                      const body = r.analysis || r.error || "No analysis available.";
+                      return `${header}\n${body}`;
+                    })
+                    .join("\n\n---\n\n");
+            onArchive(trimmed, botText);
+          }
+        } else {
+          await sleep(2000);
+        }
       }
     } catch (e) {
       console.error("Query failed:", e);
@@ -214,6 +235,7 @@ export function FootagePage({
           },
         ],
       });
+      setJobProgress(null);
       if (onArchive) {
         onArchive(trimmed, `Error running footage query: ${errorText}`);
       }
@@ -263,11 +285,11 @@ export function FootagePage({
         <div>
           <h1 className="text-2xl text-white font-semibold">Raw Footage</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Select 1 or 2 chunks, play footage, then ask targeted questions.
+            Select one or more chunks, play footage, then ask targeted questions.
           </p>
         </div>
         <div className="text-xs text-gray-500">
-          {selectedCount}/2 selected
+          {selectedCount} selected
         </div>
       </div>
 
@@ -362,61 +384,114 @@ export function FootagePage({
         )}
       </div>
 
+      {/* Processing indicator */}
+      {submitting && jobProgress && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>
+            Processing chunk {Math.min(jobProgress.completed + 1, jobProgress.total)} of{" "}
+            {jobProgress.total}…
+          </span>
+        </div>
+      )}
+      {!submitting && jobProgress && jobProgress.total > 0 && (
+        <div className="mb-1 text-[11px] text-gray-500">
+          Processed {jobProgress.completed} of {jobProgress.total} chunks for this query.
+        </div>
+      )}
+
       {/* Analysis results below chunk cards */}
       {analysisResults.length > 0 && (
-        <div className="mb-4 rounded-2xl border border-[#1a1a1a] bg-[#050505] px-4 py-3 space-y-3 max-h-80 md:max-h-96 overflow-y-auto overflow-x-hidden">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-[11px] text-gray-500 uppercase tracking-wide">
-                Analysis
-              </p>
-              {response?.query && (
-                <p className="text-sm text-white mt-0.5 line-clamp-2">
-                  “{response.query}”
+        <div className="mb-4 flex justify-center">
+          <div className="w-full max-w-3xl rounded-2xl border border-[#1a1a1a] bg-[#050505] px-4 py-3 space-y-3 max-h-80 md:max-h-96 overflow-y-auto overflow-x-hidden">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide">
+                  Analysis
                 </p>
-              )}
+                {response?.query && (
+                  <p className="text-sm text-white mt-0.5 line-clamp-2">
+                    “{response.query}”
+                  </p>
+                )}
+              </div>
+              <div className="text-xs text-gray-500 flex items-center gap-2">
+                <span>
+                  {activeResultIndex + 1} / {analysisResults.length}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="space-y-3">
-            {analysisResults.map((r, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-[#1e1e1e] bg-[#050505] p-3 space-y-2"
-              >
+
+            {analysisResults[activeResultIndex] && (
+              <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs text-gray-500">
-                    Footage {i + 1}
-                    {r.local_path ? ` • ${r.local_path}` : ""}
+                    Footage {activeResultIndex + 1}
+                    {analysisResults[activeResultIndex].local_path
+                      ? ` • ${analysisResults[activeResultIndex].local_path}`
+                      : ""}
                   </div>
-                  {r.timestamps && r.timestamps.length > 0 && (
-                    <div className="flex flex-wrap gap-1 justify-end">
-                      {r.timestamps.slice(0, 6).map((t, idx) => (
-                        <button
-                          key={`${t.seconds}-${idx}`}
-                          type="button"
-                          onClick={() =>
-                            handleJumpToTimestamp(t.seconds, r.local_path)
-                          }
-                          className="px-2 py-0.5 rounded-full text-[11px] bg-[#111111] hover:bg-[#1f1f1f] text-gray-200 border border-[#2a2a2a] transition-colors"
-                        >
-                          {t.display}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {analysisResults[activeResultIndex].timestamps &&
+                      analysisResults[activeResultIndex].timestamps!.length > 0 && (
+                        <div className="flex flex-wrap gap-1 justify-end mr-2">
+                          {analysisResults[activeResultIndex].timestamps!
+                            .slice(0, 6)
+                            .map((t, idx) => (
+                              <button
+                                key={`${t.seconds}-${idx}`}
+                                type="button"
+                                onClick={() =>
+                                  handleJumpToTimestamp(
+                                    t.seconds,
+                                    analysisResults[activeResultIndex].local_path
+                                  )
+                                }
+                                className="px-2 py-0.5 rounded-full text-[11px] bg-[#111111] hover:bg-[#1f1f1f] text-gray-200 border border-[#2a2a2a] transition-colors"
+                              >
+                                {t.display}
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveResultIndex(i => Math.max(0, i - 1))
+                      }
+                      disabled={activeResultIndex === 0}
+                      className="px-2 py-1 text-[11px] rounded bg-[#111111] text-gray-300 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveResultIndex(i =>
+                          Math.min(analysisResults.length - 1, i + 1)
+                        )
+                      }
+                      disabled={activeResultIndex >= analysisResults.length - 1}
+                      className="px-2 py-1 text-[11px] rounded bg-[#111111] text-gray-300 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
-                {r.error && (
-                  <p className="text-xs text-red-400">{r.error}</p>
+                {analysisResults[activeResultIndex].error && (
+                  <p className="text-xs text-red-400">
+                    {analysisResults[activeResultIndex].error}
+                  </p>
                 )}
-                {r.analysis && (
+                {analysisResults[activeResultIndex].analysis && (
                   <pre
                     className="w-full max-w-full text-[13px] text-gray-200 whitespace-pre-wrap break-words font-sans leading-relaxed overflow-y-auto overflow-x-hidden"
                   >
-                    {r.analysis}
+                    {analysisResults[activeResultIndex].analysis}
                   </pre>
                 )}
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}
@@ -449,7 +524,7 @@ export function FootagePage({
         </div>
         {selectedCount < 1 && (
           <p className="text-gray-600 text-xs mt-2">
-            Select 1 or 2 chunks above to enable querying.
+            Select at least one chunk above to enable querying.
           </p>
         )}
       </div>

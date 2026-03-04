@@ -292,13 +292,40 @@ export const rawFootageApi = {
   },
 
   /**
-   * Run analysis on 1 or 2 selected raw chunks.
+   * Legacy one-shot analysis on selected raw chunks.
    * Pass "__live__" as a chunk id to analyze the current in-progress hour.
    */
   async queryChunks(query, chunkIds) {
     return apiRequest('/raw', {
       method: 'POST',
       body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
+  },
+
+  /**
+   * Start an incremental raw footage analysis job that processes chunks sequentially.
+   */
+  async startJob(query, chunkIds) {
+    return apiRequest('/raw/jobs', {
+      method: 'POST',
+      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+    });
+  },
+
+  /**
+   * Get current status and partial results for a raw footage analysis job.
+   */
+  async getJob(jobId) {
+    return apiRequest(`/raw/jobs/${encodeURIComponent(jobId)}`);
+  },
+
+  /**
+   * Cleanup temporary raw query concats on the backend.
+   * Call this when leaving or refreshing the raw footage page.
+   */
+  async cleanupTemp() {
+    return apiRequest('/raw/cleanup-temp', {
+      method: 'POST',
     });
   },
 };

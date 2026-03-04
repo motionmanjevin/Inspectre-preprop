@@ -216,6 +216,63 @@ class VideoRecorder:
         ]
         return cmd
 
+    def _record_single_chunk_via_ffmpeg(self, chunk_path: str) -> bool:
+        """
+        Record a single chunk of fixed duration using FFmpeg, copying H.264 directly.
+
+        This is used by the motion-based recorder so we avoid OpenCV's VideoWriter
+        codec/timebase issues on some Windows builds.
+        """
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-rtsp_transport",
+            "tcp",
+            "-fflags",
+            "+genpts",
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-i",
+            self.rtsp_url,
+            "-map",
+            "0:v:0",
+            "-an",
+            "-c:v",
+            "copy",
+            "-t",
+            str(self.chunk_duration),
+            str(chunk_path),
+        ]
+
+        logger.info("Starting FFmpeg single-chunk recording: %s", chunk_path)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.chunk_duration + 10,
+            )
+            if result.returncode != 0:
+                logger.error(
+                    "FFmpeg single-chunk recording failed for %s: %s",
+                    chunk_path,
+                    result.stderr,
+                )
+                return False
+            if not Path(chunk_path).exists() or Path(chunk_path).stat().st_size == 0:
+                logger.error("FFmpeg single-chunk recording produced empty file: %s", chunk_path)
+                return False
+            logger.info("FFmpeg single-chunk recording completed: %s", chunk_path)
+            return True
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg single-chunk recording timed out for %s", chunk_path)
+            return False
+        except Exception as e:
+            logger.error("FFmpeg single-chunk recording error for %s: %s", chunk_path, e)
+            return False
+
     def _run_ffmpeg_segmenter(self) -> None:
         """Run ffmpeg segmenter until stopped."""
         cmd = self._build_ffmpeg_segment_cmd()
@@ -646,59 +703,14 @@ class VideoRecorder:
                     prev_frame = gray
                 
                 if motion_detected:
-                    logger.info("Motion detected! Recording one chunk (%ss).", self.chunk_duration)
+                    logger.info("Motion detected! Recording one chunk (%ss) via FFmpeg.", self.chunk_duration)
                     currently_recording = True
                     chunk_path = self._get_chunk_filename()
-                    
-                    # Record directly from the VideoCapture we're using for motion detection
-                    # (same approach as motion_recorder.py - no need to close/reopen connection)
-                    if cap is None or not cap.isOpened():
-                        logger.error("VideoCapture not available for recording")
-                        currently_recording = False
-                        continue
-                    
-                    # Get video properties
-                    fps = int(cap.get(cv2.CAP_PROP_FPS))
-                    if fps == 0:
-                        fps = 25  # Default FPS if not available
-                    
-                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    
-                    # Define codec and create VideoWriter (same as motion_recorder.py)
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    out = cv2.VideoWriter(str(chunk_path), fourcc, fps, (width, height))
-                    
-                    if not out.isOpened():
-                        logger.error(f"Failed to open video writer for {chunk_path}")
-                        currently_recording = False
-                        continue
-                    
-                    logger.info(f"Recording started: {chunk_path}")
-                    start_time = time.time()
-                    frames_recorded = 0
-                    
-                    # Record frames for the specified duration
-                    while self.is_recording and not self._stop_event.is_set():
-                        elapsed = time.time() - start_time
-                        if elapsed >= self.chunk_duration:
-                            break
-                        
-                        ret, frame = cap.read()
-                        if not ret or frame is None:
-                            logger.warning("Failed to read frame during recording")
-                            break
-                        
-                        # Write frame
-                        out.write(frame)
-                        frames_recorded += 1
-                    
-                    # Release video writer
-                    out.release()
-                    logger.info(f"Recording completed: {chunk_path} ({frames_recorded} frames)")
-                    
-                    # Check if file was created successfully
-                    if Path(chunk_path).exists() and Path(chunk_path).stat().st_size > 0:
+
+                    # Delegate actual recording to FFmpeg (direct H.264 copy) to avoid
+                    # OpenCV/codec/timebase issues on some platforms.
+                    success = self._record_single_chunk_via_ffmpeg(chunk_path)
+                    if success:
                         logger.info("Chunk recorded successfully: %s", chunk_path)
                         if self.callback:
                             try:
@@ -706,19 +718,12 @@ class VideoRecorder:
                             except Exception as e:
                                 logger.error("Chunk callback error: %s", e)
                     else:
-                        logger.warning("Chunk recording failed: file is empty or doesn't exist")
-                    
+                        logger.warning("Chunk recording failed for %s", chunk_path)
+
                     currently_recording = False
-                    
-                    # Reset baseline after recording to avoid false positives (same as motion_recorder.py)
-                    logger.debug("Resetting motion detection baseline...")
-                    for _ in range(10):  # Flush 10 frames to clear buffer
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            # Update prev_frame with the latest frame as new baseline
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            gray = cv2.GaussianBlur(gray, (21, 21), 0)
-                            prev_frame = gray
+
+                    # Reset baseline after recording to avoid false positives
+                    reset_baseline()
                 
                 time.sleep(0.033)  # ~30 FPS check rate
                 
@@ -746,7 +751,7 @@ class VideoRecorder:
         if self.is_recording:
             logger.warning("Recording already in progress")
             return
-        
+
         self.is_recording = True
         self._stop_event.clear()
         self.callback = callback
@@ -756,30 +761,21 @@ class VideoRecorder:
         self._seen_segments.clear()
         self._segment_last_sizes.clear()
 
-        if self.motion_detection_enabled:
-            # Record only on motion: one chunk per motion trigger, same duration as user set.
-            self.recording_thread = threading.Thread(
-                target=self._motion_loop,
-                daemon=True,
-                name="MotionRecorder",
-            )
-            self.recording_thread.start()
-            logger.info("Video recording started (record on motion, frame differencing).")
-        else:
-            # Continuous recording: segment monitor + FFmpeg segmenter.
-            self.segment_monitor_thread = threading.Thread(
-                target=self._segment_monitor_loop,
-                daemon=True,
-                name="SegmentMonitor",
-            )
-            self.segment_monitor_thread.start()
-            self.recording_thread = threading.Thread(
-                target=self._record_loop,
-                daemon=True,
-                name="VideoRecorder",
-            )
-            self.recording_thread.start()
-            logger.info("Video recording started (continuous).")
+        # For simplicity and robustness, always run continuous FFmpeg segmenter;
+        # motion_detection_enabled is currently ignored.
+        self.segment_monitor_thread = threading.Thread(
+            target=self._segment_monitor_loop,
+            daemon=True,
+            name="SegmentMonitor",
+        )
+        self.segment_monitor_thread.start()
+        self.recording_thread = threading.Thread(
+            target=self._record_loop,
+            daemon=True,
+            name="VideoRecorder",
+        )
+        self.recording_thread.start()
+        logger.info("Video recording started (continuous FFmpeg segmenter).")
     
     def stop_recording(self) -> None:
         """Stop recording."""

@@ -11,15 +11,98 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { rawFootageApi } from '../utils/api';
+import { rawFootageApi, API_BASE_URL, getAuthToken } from '../utils/api';
 
-const RawFootagePage = ({ onBack }) => {
+// Simple timestamp parser (mirrors logic from main App for consistency)
+const parseTimestamps = (text) => {
+  if (!text) return [];
+
+  const timestamps = [];
+  let match;
+
+  // Pattern 1: HH:MM:SS
+  const hmsPattern = /(\d{1,2}):(\d{2}):(\d{2})/g;
+  while ((match = hmsPattern.exec(text)) !== null) {
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const seconds = parseInt(match[3], 10);
+    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+    timestamps.push({
+      seconds: totalSeconds,
+      display: match[0],
+      original: match[0],
+    });
+  }
+
+  // Pattern 2: MM:SS
+  const msPattern = /(?:^|\s)(\d{1,2}):(\d{2})(?:\s|$|[^\d:])/g;
+  while ((match = msPattern.exec(text)) !== null) {
+    const minutes = parseInt(match[1], 10);
+    const seconds = parseInt(match[2], 10);
+    if (minutes < 60) {
+      const totalSeconds = minutes * 60 + seconds;
+      if (!timestamps.some(t => t.seconds === totalSeconds)) {
+        timestamps.push({
+          seconds: totalSeconds,
+          display: match[0].trim(),
+          original: match[0].trim(),
+        });
+      }
+    }
+  }
+
+  // Pattern 3: "X minutes Y seconds"
+  const minutesSecondsPattern = /(\d+)\s*(?:minutes?|mins?|m)\s*(?:and\s*)?(\d+)?\s*(?:seconds?|secs?|s)?/gi;
+  while ((match = minutesSecondsPattern.exec(text)) !== null) {
+    const minutes = parseInt(match[1], 10);
+    const seconds = match[2] ? parseInt(match[2], 10) : 0;
+    const totalSeconds = minutes * 60 + seconds;
+    if (!timestamps.some(t => t.seconds === totalSeconds)) {
+      timestamps.push({
+        seconds: totalSeconds,
+        display: `${minutes}:${seconds.toString().padStart(2, '0')}`,
+        original: match[0],
+      });
+    }
+  }
+
+  // Pattern 4: "X seconds"
+  const secondsPattern = /(\d+)\s*(?:seconds?|secs?|s)(?:\s|$|[^\d])/gi;
+  while ((match = secondsPattern.exec(text)) !== null) {
+    const seconds = parseInt(match[1], 10);
+    if (!timestamps.some(t => t.seconds === seconds)) {
+      timestamps.push({
+        seconds,
+        display: `0:${seconds.toString().padStart(2, '0')}`,
+        original: match[0],
+      });
+    }
+  }
+
+  // Sort and dedupe
+  const unique = [];
+  const seen = new Set();
+  timestamps
+    .sort((a, b) => a.seconds - b.seconds)
+    .forEach(t => {
+      if (!seen.has(t.seconds)) {
+        seen.add(t.seconds);
+        unique.push(t);
+      }
+    });
+
+  return unique;
+};
+
+const RawFootagePage = ({ onBack, onOpenVideo }) => {
   const [chunks, setChunks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
   const [query, setQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState([]);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const [jobProgress, setJobProgress] = useState(null);
 
   useEffect(() => {
     fetchChunks();
@@ -28,6 +111,12 @@ const RawFootagePage = ({ onBack }) => {
   const fetchChunks = async () => {
     try {
       setLoading(true);
+      // Cleanup any stale temporary raw query concats when refreshing
+      try {
+        await rawFootageApi.cleanupTemp();
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup temp raw queries:', cleanupError?.message || cleanupError);
+      }
       const data = await rawFootageApi.list();
       setChunks(data.chunks || []);
     } catch (error) {
@@ -40,17 +129,10 @@ const RawFootagePage = ({ onBack }) => {
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else if (next.size < 2) {
-        next.add(id);
-      } else {
-        // If already have 2, replace with this one
-        next.clear();
-        next.add(id);
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
       }
-      return Array.from(next);
+      return [...prev, id];
     });
   };
 
@@ -59,11 +141,33 @@ const RawFootagePage = ({ onBack }) => {
     try {
       setSubmitting(true);
       setResults([]);
-      const response = await rawFootageApi.queryChunks(query.trim(), selectedIds);
-      setResults(response.results || []);
+      setJobProgress(null);
+
+      const start = await rawFootageApi.startJob(query.trim(), selectedIds);
+      setJobProgress({ total: start.total_chunks, completed: 0 });
+
+      let done = false;
+      while (!done) {
+        const status = await rawFootageApi.getJob(start.job_id);
+        setResults(status.results || []);
+        setActiveResultIndex(0);
+        setJobProgress({
+          total: status.total_chunks,
+          completed: status.completed_chunks,
+        });
+
+        if (status.status === 'completed' || status.status === 'failed') {
+          done = true;
+        } else {
+          // Wait briefly before polling again
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
     } catch (error) {
       console.error('Error querying raw footage:', error);
       Alert.alert('Error', error.message || 'Failed to analyze raw footage');
+      setJobProgress(null);
     } finally {
       setSubmitting(false);
     }
@@ -126,6 +230,25 @@ const RawFootagePage = ({ onBack }) => {
   };
 
   const renderResult = (result, index) => {
+    const timestamps = parseTimestamps(result.analysis || '');
+
+    const handleTimestampPress = (ts) => {
+      if (!onOpenVideo) return;
+
+      const videoUrl = result.video_url || '';
+      const videoData = {
+        title: `Raw footage ${index + 1}`,
+        timestamp: '',
+        location: result.local_path || videoUrl,
+        videoUrl,
+        localPath: result.local_path,
+        timestamps,
+        initialSeekSeconds: ts.seconds,
+      };
+
+      onOpenVideo(videoData, ts.seconds);
+    };
+
     return (
       <View key={index} style={styles.resultCard}>
         <Text style={styles.resultHeader}>
@@ -136,7 +259,38 @@ const RawFootagePage = ({ onBack }) => {
           <Text style={styles.resultError}>{result.error}</Text>
         )}
         {result.analysis && (
-          <Text style={styles.resultText}>{result.analysis}</Text>
+          <>
+            <Text style={styles.resultText}>{result.analysis}</Text>
+            {timestamps.length > 0 && (
+              <View style={styles.resultTimestampsContainer}>
+                <Text style={styles.resultTimestampsLabel}>Jump to:</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.resultTimestampsScroll}
+                >
+                  {timestamps.map((ts, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={styles.resultTimestampButton}
+                      onPress={() => handleTimestampPress(ts)}
+                      activeOpacity={0.7}
+                    >
+                      <LinearGradient
+                        colors={['rgba(107, 114, 128, 0.25)', 'rgba(107, 114, 128, 0.15)', 'rgba(75, 85, 99, 0.1)']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.resultTimestampGradient}
+                      >
+                        <Ionicons name="time-outline" size={14} color="#6b7280" style={styles.resultTimestampIcon} />
+                        <Text style={styles.resultTimestampText}>{ts.display}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </>
         )}
       </View>
     );
@@ -182,11 +336,54 @@ const RawFootagePage = ({ onBack }) => {
             </View>
           )}
 
-          {/* Results */}
+          {/* Simple processing indicator */}
+          {submitting && jobProgress && (
+            <View style={styles.processingRow}>
+              <ActivityIndicator size="small" color="#6b7280" />
+              <Text style={styles.processingText}>
+                Processing chunk {Math.min(jobProgress.completed + 1, jobProgress.total)} of{' '}
+                {jobProgress.total}…
+              </Text>
+            </View>
+          )}
+
+          {/* Results - swipeable between outputs */}
           {results.length > 0 && (
             <View style={styles.resultsSection}>
-              <Text style={styles.sectionLabel}>Analysis</Text>
-              {results.map(renderResult)}
+              <View style={styles.resultsHeaderRow}>
+                <Text style={styles.sectionLabel}>Analysis</Text>
+                <Text style={styles.resultsCounter}>
+                  {activeResultIndex + 1} / {results.length}
+                </Text>
+              </View>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={(e) => {
+                  const { contentOffset, layoutMeasurement } = e.nativeEvent;
+                  const index = Math.round(
+                    contentOffset.x / Math.max(1, layoutMeasurement.width)
+                  );
+                  if (index >= 0 && index < results.length) {
+                    setActiveResultIndex(index);
+                  }
+                }}
+                scrollEventThrottle={16}
+              >
+                {results.map(renderResult)}
+              </ScrollView>
+              <View style={styles.dotsRow}>
+                {results.map((_, idx) => (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.dot,
+                      idx === activeResultIndex && styles.dotActive,
+                    ]}
+                  />
+                ))}
+              </View>
             </View>
           )}
         </ScrollView>
@@ -354,16 +551,60 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
   },
+  processingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 8,
+  },
+  processingText: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
   resultsSection: {
     marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.06)',
+  },
+  resultsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+  resultsCounter: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#e5e7eb',
+    marginHorizontal: 2,
+  },
+  dotActive: {
+    backgroundColor: '#60a5fa',
   },
   resultCard: {
+    width: 320,
+    marginHorizontal: 20,
     backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(15, 23, 42, 0.06)',
-    marginTop: 8,
   },
   resultHeader: {
     color: '#111827',
@@ -379,6 +620,37 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 13,
     lineHeight: 19,
+  },
+  resultTimestampsContainer: {
+    marginTop: 10,
+  },
+  resultTimestampsLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  resultTimestampsScroll: {
+    paddingVertical: 2,
+    paddingRight: 4,
+  },
+  resultTimestampButton: {
+    marginRight: 8,
+  },
+  resultTimestampGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(243, 244, 246, 1)',
+  },
+  resultTimestampIcon: {
+    marginRight: 4,
+  },
+  resultTimestampText: {
+    fontSize: 12,
+    color: '#374151',
   },
   emptyState: {
     alignItems: 'center',

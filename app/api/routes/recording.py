@@ -58,12 +58,11 @@ async def start_recording(
         raw_mode = request.raw_mode or False
 
         if raw_mode:
-            # Raw recording: 1‑min chunks, saved in footage dir, recorded only when motion is detected.
+            # Raw recording: 1‑min continuous chunks, saved in footage dir.
             # These chunks are later concatenated into 1‑hour files and uploaded once.
             output_dir = settings.RAW_FOOTAGE_DIR
-            chunk_duration_seconds = 60  # 1 minute per motion-triggered chunk
-            # Force motion detection for raw mode regardless of UI toggle
-            motion_detection_enabled = True
+            chunk_duration_seconds = 60  # 1 minute per chunk
+            motion_detection_enabled = False  # motion-based recording disabled
             motion_threshold = request.motion_threshold or 0.3
             from app.main import raw_chunk_callback
             callback = raw_chunk_callback
@@ -74,7 +73,8 @@ async def start_recording(
                 chunk_duration_seconds = request.chunk_duration * 60
             else:
                 chunk_duration_seconds = settings.VIDEO_CHUNK_DURATION
-            motion_detection_enabled = request.motion_detection_enabled or False
+            # Motion-based recording is disabled; always run continuous FFmpeg segmenter.
+            motion_detection_enabled = False
             motion_threshold = request.motion_threshold or 0.3
             from app.main import chunk_callback
             callback = chunk_callback
