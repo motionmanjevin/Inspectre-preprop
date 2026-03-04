@@ -38,7 +38,8 @@
         {
           "cameraPermission": "Allow Inspectre to access your camera to scan QR codes for device pairing."
         }
-      ]
+      ],
+      "expo-video"
     ]
   }
 }

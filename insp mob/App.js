@@ -9,7 +9,6 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   Animated,
   Modal,
   Dimensions,
@@ -17,7 +16,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import EyeIcon from './components/EyeIcon';
 import SplashScreen from './components/SplashScreen';
 import LoginScreen from './components/LoginScreen';
@@ -165,40 +165,46 @@ const parseTimestamps = (text) => {
 
 // Video Overlay Modal Component
 const VideoOverlay = ({ visible, onClose, videoData }) => {
-  const videoRef = useRef(null);
   const timestamps = videoData?.timestamps || [];
   const initialSeekSeconds = videoData?.initialSeekSeconds ?? null;
 
-  const handleSeek = async (seconds) => {
+  const player = useVideoPlayer(videoData?.videoUrl ?? null, (playerInstance) => {
+    if (initialSeekSeconds != null) {
+      playerInstance.currentTime = initialSeekSeconds;
+    }
+    if (visible) {
+      playerInstance.play();
+    }
+  });
+
+  const handleSeek = (seconds) => {
     try {
-      if (videoRef.current) {
-        // Use playFromPositionAsync for more reliable seeking
-        await videoRef.current.playFromPositionAsync(seconds * 1000, {
-          toleranceMillisBefore: 100,
-          toleranceMillisAfter: 100,
-        });
-      }
+      player.currentTime = seconds;
+      player.play();
     } catch (error) {
       console.error('Error seeking video:', error);
-      // Fallback to setPositionAsync if playFromPositionAsync fails
-      try {
-        if (videoRef.current) {
-          await videoRef.current.setPositionAsync(seconds * 1000);
-        }
-      } catch (fallbackError) {
-        console.error('Fallback seek also failed:', fallbackError);
-      }
     }
   };
 
-  // If an initial seek time is provided (e.g. from raw footage page),
-  // perform a one-time seek when the overlay is shown.
   useEffect(() => {
-    if (visible && initialSeekSeconds != null) {
-      handleSeek(initialSeekSeconds);
+    if (!visible) {
+      try {
+        player.pause();
+      } catch {
+        // ignore
+      }
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, initialSeekSeconds]);
+    if (!videoData?.videoUrl) return;
+    try {
+      if (initialSeekSeconds != null) {
+        player.currentTime = initialSeekSeconds;
+      }
+      player.play();
+    } catch (error) {
+      console.error('Error starting playback:', error);
+    }
+  }, [visible, initialSeekSeconds, videoData?.videoUrl, player]);
 
   if (!visible) return null;
 
@@ -222,13 +228,11 @@ const VideoOverlay = ({ visible, onClose, videoData }) => {
           
           <View style={styles.videoPlayerContainer}>
             {videoData?.videoUrl ? (
-              <Video
-                ref={videoRef}
-                source={{ uri: videoData.videoUrl }}
+              <VideoView
                 style={styles.videoPlayer}
-                useNativeControls
-                shouldPlay
-                resizeMode={ResizeMode.CONTAIN}
+                player={player}
+                nativeControls
+                contentFit="contain"
               />
             ) : (
               <View style={styles.videoPlayer}>
