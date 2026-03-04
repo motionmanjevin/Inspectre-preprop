@@ -13,11 +13,13 @@ import {
   Modal,
   Dimensions,
   Alert,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import EyeIcon from './components/EyeIcon';
 import SplashScreen from './components/SplashScreen';
 import LoginScreen from './components/LoginScreen';
@@ -32,7 +34,8 @@ import {
   setTunnelUrl, 
   removeAuthToken,
   initializeApiBaseUrl,
-  API_BASE_URL 
+  API_BASE_URL,
+  rawFootageApi,
 } from './utils/api';
 import MenuDrawer from './components/MenuDrawer';
 import AlertsPage from './components/AlertsPage';
@@ -304,6 +307,67 @@ const VideoCard = ({ children, onPress }) => {
   );
 };
 
+const _thumbCache = {};
+
+const ChunkCardThumb = ({ chunk }) => {
+  const [uri, setUri] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const generate = async () => {
+      if (chunk.is_live || chunk.id === '__live__') {
+        setLoading(false);
+        return;
+      }
+
+      if (_thumbCache[chunk.id]) {
+        setUri(_thumbCache[chunk.id]);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const token = await getAuthToken();
+        const videoUrl = `${API_BASE_URL}/raw/videos/${encodeURIComponent(chunk.filename)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(videoUrl, {
+          time: 5000,
+        });
+        if (!cancelled) {
+          _thumbCache[chunk.id] = thumbUri;
+          setUri(thumbUri);
+        }
+      } catch (e) {
+        // Thumbnail generation failed; keep skeleton
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    generate();
+    return () => { cancelled = true; };
+  }, [chunk.id, chunk.filename, chunk.is_live]);
+
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={styles.rawChunkThumb}
+        resizeMode="cover"
+      />
+    );
+  }
+
+  return (
+    <View style={styles.rawChunkThumb}>
+      {loading && (
+        <Animated.View style={styles.thumbShimmer} />
+      )}
+    </View>
+  );
+};
+
 const CHAT_HISTORY_KEY = 'inspectre_chat_history';
 
 export default function App() {
@@ -323,6 +387,9 @@ export default function App() {
   const [availableDates, setAvailableDates] = useState([]);
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [loadingDates, setLoadingDates] = useState(false);
+  const [rawChunks, setRawChunks] = useState([]);
+  const [selectedRawChunkIds, setSelectedRawChunkIds] = useState([]);
+  const [lockedRawChunkIds, setLockedRawChunkIds] = useState(null);
 
   // Initialize tunnel URL and check auth after splash finishes
   const handleSplashFinish = async () => {
@@ -465,21 +532,33 @@ export default function App() {
     setMessages(restoredMessages);
   };
 
-  // Fetch available dates
+  // Fetch available dates and raw footage chunks for chat page
   const fetchAvailableDates = async () => {
     setLoadingDates(true);
     try {
-      const response = await searchApiExtended.getAvailableDates();
-      setAvailableDates(response.dates || []);
+      const data = await rawFootageApi.list();
+      const chunks = data.chunks || [];
+      setRawChunks(chunks);
+
+      const datesSet = new Set();
+      chunks.forEach(chunk => {
+        if (chunk.date) {
+          datesSet.add(chunk.date);
+        }
+      });
+      // Sort newest first (descending)
+      const sortedDates = Array.from(datesSet).sort((a, b) => (a < b ? 1 : -1));
+      setAvailableDates(sortedDates);
     } catch (error) {
-      console.error('Error fetching available dates:', error);
+      console.error('Error fetching raw footage for dates:', error);
       setAvailableDates([]);
+      setRawChunks([]);
     } finally {
       setLoadingDates(false);
     }
   };
 
-  // Get target date for API calls
+  // Get target date string for filtering raw footage
   const getTargetDate = () => {
     if (timeFilter === 'Last 24 hours' || !selectedDate) {
       return null;
@@ -553,68 +632,66 @@ export default function App() {
   };
 
   const handleSend = async () => {
-    if (!message.trim()) return;
-    
+    const chunkIdsToUse =
+      lockedRawChunkIds && lockedRawChunkIds.length > 0
+        ? lockedRawChunkIds
+        : selectedRawChunkIds;
+
+    if (!message.trim() || chunkIdsToUse.length === 0) return;
+
     const userMessage = { id: Date.now(), text: message, type: 'user' };
     setMessages(prev => [...prev, userMessage]);
-    
+
     const queryText = message;
     setMessage('');
     setIsLoading(true);
 
     try {
-      const token = await getAuthToken();
-      const targetDate = getTargetDate();
-      const response = await analysisApi.analyze(queryText, 5, targetDate);
-      
-      // Process each analysis result - show video card + analysis text
+      // Lock in the initial selection for this chat session
+      if (!lockedRawChunkIds || lockedRawChunkIds.length === 0) {
+        setLockedRawChunkIds(chunkIdsToUse);
+      }
+
+      const response = await rawFootageApi.queryChunks(queryText, chunkIdsToUse);
+
       if (response.results && response.results.length > 0) {
         response.results.forEach((result, index) => {
-          // Parse timestamps from analysis text
           const timestamps = result.analysis ? parseTimestamps(result.analysis) : [];
-          
-          // Add video card first
           const localPath = result.local_path;
-          const playableUrl = localPath
-            ? `${API_BASE_URL}/videos/${encodeURIComponent(String(localPath))}${token ? `?token=${encodeURIComponent(token)}` : ''}`
-            : result.video_url;
+          const videoUrl = result.video_url;
 
           const videoMessage = {
             id: Date.now() + index * 2,
             type: 'video',
-            title: `Analysis Result ${index + 1}`,
+            title: `Raw footage ${index + 1}`,
             timestamp: new Date().toISOString(),
-            location: localPath || result.video_url,
-            videoUrl: playableUrl,
-            localPath: localPath,
-            timestamps: timestamps, // Store parsed timestamps
+            location: localPath || videoUrl,
+            videoUrl,
+            localPath,
+            timestamps,
           };
           setMessages(prev => [...prev, videoMessage]);
 
-          // Then add analysis text
-          if (result.error) {
-            setMessages(prev => [...prev, {
+          setMessages(prev => [
+            ...prev,
+            {
               id: Date.now() + index * 2 + 1,
               type: 'llm',
-              analysis: `Video ${index + 1}: Error - ${result.error}`,
-            }]);
-          } else if (result.analysis) {
-            setMessages(prev => [...prev, {
-              id: Date.now() + index * 2 + 1,
-              type: 'llm',
-              analysis: result.analysis,
-            }]);
-          }
+              analysis: result.analysis || result.error || 'No analysis available',
+            },
+          ]);
         });
       } else {
-        setMessages(prev => [...prev, {
-          id: Date.now(),
-          type: 'llm',
-          analysis: 'No videos found to analyze.',
-        }]);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now(),
+            type: 'llm',
+            analysis: 'No relevant raw footage found for your query.',
+          },
+        ]);
       }
     } catch (error) {
-      // Handle token expiration
       if (error.code === 'TOKEN_EXPIRED' || error.message?.includes('Token expired')) {
         setIsLoggedIn(false);
         await removeAuthToken();
@@ -625,26 +702,36 @@ export default function App() {
         );
         return;
       }
-      
-      setMessages(prev => [...prev, {
-        id: Date.now(),
-        type: 'llm',
-        analysis: `Error: ${error.message || 'Failed to analyze videos'}`,
-      }]);
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: Date.now(),
+          type: 'llm',
+          analysis: `Error: ${error.message || 'Failed to analyze raw footage'}`,
+        },
+      ]);
     } finally {
       setIsLoading(false);
-      // Save chat history after each query
       saveChatHistory();
     }
   };
 
+  const resetChatSession = () => {
+    setMessages([]);
+    setLockedRawChunkIds(null);
+    setSelectedRawChunkIds([]);
+    setMessage('');
+  };
+
   // Handle navigation
   const handleNavigate = (page) => {
-    setCurrentPage(page);
     if (page === 'chat') {
-      // Save current conversation before switching
+      resetChatSession();
+    } else {
       saveChatHistory();
     }
+    setCurrentPage(page);
   };
 
   // Load available dates when logged in and on chat page
@@ -725,8 +812,8 @@ export default function App() {
       <>
         <AlertsPage
           onBack={() => {
+            resetChatSession();
             setCurrentPage('chat');
-            saveChatHistory();
           }}
         />
         {isLoggedIn && (
@@ -746,8 +833,8 @@ export default function App() {
       <>
         <ChatHistoryPage
           onBack={() => {
+            resetChatSession();
             setCurrentPage('chat');
-            saveChatHistory();
           }}
           onRestoreConversation={restoreConversation}
         />
@@ -768,8 +855,8 @@ export default function App() {
       <>
         <ProcessingTimelinePage
           onBack={() => {
+            resetChatSession();
             setCurrentPage('chat');
-            saveChatHistory();
           }}
         />
         {isLoggedIn && (
@@ -794,8 +881,8 @@ export default function App() {
             } catch (e) {
               console.warn('Failed to cleanup temp raw queries on back:', e?.message || e);
             }
+            resetChatSession();
             setCurrentPage('chat');
-            saveChatHistory();
           }}
           onOpenVideo={(videoData) => handleVideoPress(videoData)}
         />
@@ -881,13 +968,80 @@ export default function App() {
         {currentPage === 'chat' && (
           <>
             <View style={styles.content}>
+              {/* Before first response: center hero + chunk cards, no messages list */}
               {isFirstTime ? (
-                <View style={styles.welcomeContainer}>
-                  <EyeIcon />
-                  <Text style={styles.welcomeText}>What are we looking for?</Text>
+                <View style={styles.introSection}>
+                  <View style={styles.welcomeContainer}>
+                    <EyeIcon />
+                    <Text style={styles.welcomeText}>What are we looking for?</Text>
+                  </View>
+
+                  <View style={styles.rawChunksSection}>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ flexGrow: 0 }}
+                      contentContainerStyle={styles.rawChunksScroll}
+                    >
+                      {rawChunks
+                        .filter(chunk => {
+                          const targetDate = getTargetDate();
+                          if (!targetDate && timeFilter === 'Last 24 hours') {
+                            try {
+                              const now = new Date();
+                              const [y, m, d] = chunk.date.split('-').map(Number);
+                              const [hh, mm, ss] = chunk.time.split(':').map(Number);
+                              const end = new Date(y, m - 1, d, hh, mm, ss);
+                              return now.getTime() - end.getTime() <= 24 * 60 * 60 * 1000;
+                            } catch {
+                              return true;
+                            }
+                          }
+                          if (targetDate) {
+                            return chunk.date === targetDate;
+                          }
+                          return true;
+                        })
+                        .map(chunk => {
+                          const isSelected = selectedRawChunkIds.includes(chunk.id);
+                          const isLive = !!chunk.is_live;
+                          const endDate = new Date(`${chunk.date}T${chunk.time}`);
+                          const timeLabel = endDate.toLocaleTimeString([], {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          });
+
+                          const disabled = !!lockedRawChunkIds && lockedRawChunkIds.length > 0;
+
+                          return (
+                            <TouchableOpacity
+                              key={chunk.id}
+                              onPress={() => {
+                                if (disabled) return;
+                                setSelectedRawChunkIds(prev =>
+                                  prev.includes(chunk.id)
+                                    ? prev.filter(id => id !== chunk.id)
+                                    : [...prev, chunk.id],
+                                );
+                              }}
+                              activeOpacity={0.8}
+                              style={[
+                                styles.rawChunkCard,
+                                isSelected && styles.rawChunkCardSelected,
+                              ]}
+                            >
+                              <ChunkCardThumb chunk={chunk} />
+                              <Text style={styles.rawChunkTime}>{timeLabel}</Text>
+                              {isLive && <Text style={styles.rawChunkLive}>LIVE</Text>}
+                            </TouchableOpacity>
+                          );
+                        })}
+                    </ScrollView>
+                  </View>
                 </View>
               ) : (
-                <ScrollView 
+                // After first response: full chat UI
+                <ScrollView
                   style={styles.messagesContainer}
                   contentContainerStyle={styles.messagesContent}
                   showsVerticalScrollIndicator={false}
@@ -906,41 +1060,43 @@ export default function App() {
               )}
             </View>
 
+            {/* Input bar */}
             <View style={styles.inputContainer}>
-          <View style={styles.inputWrapper}>
-            <LinearGradient
-              colors={['rgba(129, 140, 248, 0.18)', 'rgba(129, 140, 248, 0.06)', 'rgba(37, 99, 235, 0.04)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.inputGradientBorder}
-            />
-            <TextInput
-              style={styles.textInput}
-              value={message}
-              onChangeText={setMessage}
-              placeholder="Message Inspectre"
-                placeholderTextColor="#9ca3af"
-              multiline
-              maxLength={500}
-            />
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.searchButton]}
-                onPress={handleSearch}
-                disabled={!message.trim() || isLoading}
-              >
-                <Ionicons name="search" size={20} color={message.trim() && !isLoading ? "#111827" : "#9ca3af"} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.sendButton]}
-                onPress={handleSend}
-                disabled={!message.trim() || isLoading}
-              >
-                <Ionicons name="send" size={20} color={message.trim() && !isLoading ? "#111827" : "#9ca3af"} />
-              </TouchableOpacity>
+              <View style={styles.inputWrapper}>
+                <LinearGradient
+                  colors={['rgba(129, 140, 248, 0.18)', 'rgba(129, 140, 248, 0.06)', 'rgba(37, 99, 235, 0.04)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.inputGradientBorder}
+                />
+                <TextInput
+                  style={styles.textInput}
+                  value={message}
+                  onChangeText={setMessage}
+                  placeholder="Message Inspectre"
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                  maxLength={500}
+                />
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.sendButton]}
+                    onPress={handleSend}
+                    disabled={
+                      !message.trim() ||
+                      isLoading ||
+                      (!lockedRawChunkIds && selectedRawChunkIds.length === 0)
+                    }
+                  >
+                    <Ionicons
+                      name="send"
+                      size={20}
+                      color={message.trim() && !isLoading ? "#111827" : "#9ca3af"}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          </View>
-        </View>
           </>
         )}
       </KeyboardAvoidingView>
@@ -1057,20 +1213,84 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    justifyContent: 'center',
+  },
+  introSection: {
+    alignItems: 'center',
   },
   welcomeContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 48,
+    paddingHorizontal: 32,
+    marginBottom: 24,
   },
   welcomeText: {
     fontSize: 16,
     color: '#4b5563',
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: 24,
     fontWeight: '400',
     letterSpacing: 0.2,
+  },
+  rawChunksSection: {
+    marginTop: 0,
+    paddingBottom: 0,
+  },
+  rawChunksLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 6,
+    fontWeight: '500',
+    paddingHorizontal: 32,
+  },
+  rawChunksScroll: {
+    paddingHorizontal: 24,
+    paddingVertical: 0,
+    alignItems: 'flex-start',
+  },
+  rawChunkCard: {
+    width: 180,
+    marginRight: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+    alignItems: 'center',
+  },
+  rawChunkCardSelected: {
+    borderColor: '#6366f1',
+    borderWidth: 1.3,
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  rawChunkThumb: {
+    width: '100%',
+    height: 85,
+    borderRadius: 10,
+    backgroundColor: '#e5e7eb',
+    marginBottom: 6,
+    overflow: 'hidden',
+  },
+  thumbShimmer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#d1d5db',
+    opacity: 0.5,
+  },
+  rawChunkTime: {
+    fontSize: 12,
+    color: '#111827',
+    fontWeight: '500',
+  },
+  rawChunkLive: {
+    marginTop: 2,
+    fontSize: 10,
+    color: '#16a34a',
+    fontWeight: '600',
   },
   messagesContainer: {
     flex: 1,
