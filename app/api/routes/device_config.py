@@ -1,0 +1,124 @@
+"""Device configuration API routes."""
+import logging
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
+
+from app.api.dependencies import get_current_user
+from app.services.device_config_service import (
+    get_device_config,
+    upsert_device_config,
+    has_device_config,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/device-config", tags=["device-config"])
+
+
+class DeviceConfigRequest(BaseModel):
+    rtsp_url: Optional[str] = None
+    camera_name: Optional[str] = None
+    video_preprompt: Optional[str] = None
+    r2_account_id: Optional[str] = None
+    r2_access_key_id: Optional[str] = None
+    r2_secret_access_key: Optional[str] = None
+    r2_bucket_name: Optional[str] = None
+    r2_public_url_base: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_address: Optional[str] = None
+    smtp_use_tls: Optional[bool] = None
+    reliable_internet: Optional[bool] = None
+    local_storage_max_gb: Optional[float] = None
+    r2_max_gb: Optional[float] = None
+
+
+class DeviceConfigResponse(BaseModel):
+    rtsp_url: str = ""
+    camera_name: str = ""
+    video_preprompt: str = ""
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = ""
+    r2_public_url_base: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = ""
+    smtp_use_tls: bool = True
+    reliable_internet: bool = True
+    local_storage_max_gb: float = 50.0
+    r2_max_gb: float = 10.0
+
+
+@router.get("", response_model=DeviceConfigResponse)
+async def read_device_config(current_user: dict = Depends(get_current_user)):
+    """Get the current device configuration."""
+    cfg = get_device_config()
+    if not cfg:
+        return DeviceConfigResponse()
+    return DeviceConfigResponse(
+        rtsp_url=cfg.get("rtsp_url", ""),
+        camera_name=cfg.get("camera_name", ""),
+        video_preprompt=cfg.get("video_preprompt", ""),
+        r2_account_id=cfg.get("r2_account_id", ""),
+        r2_access_key_id=cfg.get("r2_access_key_id", ""),
+        r2_secret_access_key=cfg.get("r2_secret_access_key", ""),
+        r2_bucket_name=cfg.get("r2_bucket_name", ""),
+        r2_public_url_base=cfg.get("r2_public_url_base", ""),
+        smtp_host=cfg.get("smtp_host", ""),
+        smtp_port=cfg.get("smtp_port", 587),
+        smtp_username=cfg.get("smtp_username", ""),
+        smtp_password=cfg.get("smtp_password", ""),
+        smtp_from_address=cfg.get("smtp_from_address", ""),
+        smtp_use_tls=bool(cfg.get("smtp_use_tls", 1)),
+        reliable_internet=bool(cfg.get("reliable_internet", 1)),
+        local_storage_max_gb=cfg.get("local_storage_max_gb", 50.0),
+        r2_max_gb=cfg.get("r2_max_gb", 10.0),
+    )
+
+
+@router.put("", response_model=DeviceConfigResponse)
+async def update_device_config(
+    req: DeviceConfigRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update device configuration. Only provided fields are changed."""
+    data = req.dict(exclude_none=True)
+    if "smtp_use_tls" in data:
+        data["smtp_use_tls"] = 1 if data["smtp_use_tls"] else 0
+    if "reliable_internet" in data:
+        data["reliable_internet"] = 1 if data["reliable_internet"] else 0
+    cfg = upsert_device_config(data)
+
+    # If the system was waiting for setup, trigger service startup now
+    from app.core.system_state import system_state, SystemMode
+    if system_state.mode == SystemMode.IDLE_NO_ACCOUNT:
+        import threading
+        from app.core.startup_orchestrator import run_startup_sequence
+        threading.Thread(target=run_startup_sequence, daemon=True, name="PostConfigStartup").start()
+
+    return DeviceConfigResponse(
+        rtsp_url=cfg.get("rtsp_url", ""),
+        camera_name=cfg.get("camera_name", ""),
+        video_preprompt=cfg.get("video_preprompt", ""),
+        r2_account_id=cfg.get("r2_account_id", ""),
+        r2_access_key_id=cfg.get("r2_access_key_id", ""),
+        r2_secret_access_key=cfg.get("r2_secret_access_key", ""),
+        r2_bucket_name=cfg.get("r2_bucket_name", ""),
+        r2_public_url_base=cfg.get("r2_public_url_base", ""),
+        smtp_host=cfg.get("smtp_host", ""),
+        smtp_port=cfg.get("smtp_port", 587),
+        smtp_username=cfg.get("smtp_username", ""),
+        smtp_password=cfg.get("smtp_password", ""),
+        smtp_from_address=cfg.get("smtp_from_address", ""),
+        smtp_use_tls=bool(cfg.get("smtp_use_tls", 1)),
+        reliable_internet=bool(cfg.get("reliable_internet", 1)),
+        local_storage_max_gb=cfg.get("local_storage_max_gb", 50.0),
+        r2_max_gb=cfg.get("r2_max_gb", 10.0),
+    )

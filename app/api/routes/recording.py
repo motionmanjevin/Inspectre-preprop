@@ -59,12 +59,14 @@ async def start_recording(
 
         if raw_mode:
             # Raw recording: 1‑min continuous chunks, saved in footage dir.
-            # These chunks are later concatenated into 1‑hour files and uploaded once.
+            # These chunks are later concatenated into 1‑hour (or partial) files.
+            # Upload to R2 after each save only when raw_auto_upload (reliable internet) is True.
             output_dir = settings.RAW_FOOTAGE_DIR
             chunk_duration_seconds = 60  # 1 minute per chunk
             motion_detection_enabled = False  # motion-based recording disabled
             motion_threshold = request.motion_threshold or 0.3
-            from app.main import raw_chunk_callback
+            from app.main import raw_chunk_callback, set_raw_auto_upload
+            set_raw_auto_upload(request.raw_auto_upload if request.raw_auto_upload is not None else True)
             callback = raw_chunk_callback
             _raw_recording_active = True
         else:
@@ -89,7 +91,11 @@ async def start_recording(
         )
         
         _video_recorder.start_recording(callback=callback)
-        
+
+        if raw_mode:
+            from app.services.device_config_service import set_recording_active
+            set_recording_active(True)
+
         logger.info(f"Recording started for {request.rtsp_url}" + (" (raw footage)" if raw_mode else ""))
         return RecordingResponse(
             status="recording_started",
@@ -139,6 +145,8 @@ async def stop_recording(
         if was_raw:
             from app.main import flush_raw_segments
             flush_raw_segments()
+        from app.services.device_config_service import set_recording_active
+        set_recording_active(False)
         logger.info("Recording stopped")
         return RecordingResponse(
             status="recording_stopped",

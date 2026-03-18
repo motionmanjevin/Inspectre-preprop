@@ -19,7 +19,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import EyeIcon from './components/EyeIcon';
 import SplashScreen from './components/SplashScreen';
 import LoginScreen from './components/LoginScreen';
@@ -36,12 +35,15 @@ import {
   initializeApiBaseUrl,
   API_BASE_URL,
   rawFootageApi,
+  systemApi,
+  billingApi,
 } from './utils/api';
 import MenuDrawer from './components/MenuDrawer';
-import AlertsPage from './components/AlertsPage';
+import AutopilotPage from './components/AutopilotPage';
 import ChatHistoryPage from './components/ChatHistoryPage';
 import ProcessingTimelinePage from './components/ProcessingTimelinePage';
 import RawFootagePage from './components/RawFootagePage';
+import PaymentsPage from './components/PaymentsPage';
 import DateFilterModal from './components/DateFilterModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -81,6 +83,43 @@ const AnimatedText = ({ children, delay = 0 }) => {
       <Text style={styles.aiText}>{displayedText}</Text>
     </View>
   );
+};
+
+// Human-readable time range for a raw chunk card (e.g. "Today, 4:45 PM – 5:45 PM")
+const formatChunkTimeRange = (chunk) => {
+  try {
+    const startDate = new Date(`${chunk.date}T${chunk.time}`);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const chunkDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    let datePrefix = '';
+    if (chunkDay.getTime() === today.getTime()) {
+      datePrefix = 'Today, ';
+    } else if (chunkDay.getTime() === yesterday.getTime()) {
+      datePrefix = 'Yesterday, ';
+    } else if (startDate.getFullYear() === now.getFullYear()) {
+      datePrefix = startDate.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ';
+    } else {
+      datePrefix = startDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + ', ';
+    }
+
+    const fmt = { hour: 'numeric', minute: '2-digit' };
+    const startLabel = startDate.toLocaleTimeString([], fmt);
+    let endLabel;
+    if (chunk.is_live) {
+      endLabel = 'now';
+    } else {
+      const durMs = (chunk.duration_seconds || 3600) * 1000;
+      const endDate = new Date(startDate.getTime() + durMs);
+      endLabel = endDate.toLocaleTimeString([], fmt);
+    }
+    return `${datePrefix}${startLabel} – ${endLabel}`;
+  } catch {
+    return chunk.time || '–';
+  }
 };
 
 // Utility function to parse timestamps from text
@@ -307,64 +346,41 @@ const VideoCard = ({ children, onPress }) => {
   );
 };
 
-const _thumbCache = {};
-
 const ChunkCardThumb = ({ chunk }) => {
-  const [uri, setUri] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [thumbUrl, setThumbUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (chunk.is_live || chunk.id === '__live__') return;
+
     let cancelled = false;
-
-    const generate = async () => {
-      if (chunk.is_live || chunk.id === '__live__') {
-        setLoading(false);
-        return;
-      }
-
-      if (_thumbCache[chunk.id]) {
-        setUri(_thumbCache[chunk.id]);
-        setLoading(false);
-        return;
-      }
-
+    (async () => {
       try {
         const token = await getAuthToken();
-        const videoUrl = `${API_BASE_URL}/raw/videos/${encodeURIComponent(chunk.filename)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-        const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(videoUrl, {
-          time: 5000,
-        });
-        if (!cancelled) {
-          _thumbCache[chunk.id] = thumbUri;
-          setUri(thumbUri);
-        }
-      } catch (e) {
-        // Thumbnail generation failed; keep skeleton
-      } finally {
-        if (!cancelled) setLoading(false);
+        const url = `${API_BASE_URL}/raw/thumbnails/${encodeURIComponent(chunk.filename)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+        if (!cancelled) setThumbUrl(url);
+      } catch {
+        if (!cancelled) setFailed(true);
       }
-    };
-
-    generate();
+    })();
     return () => { cancelled = true; };
   }, [chunk.id, chunk.filename, chunk.is_live]);
 
-  if (uri) {
-    return (
-      <Image
-        source={{ uri }}
-        style={styles.rawChunkThumb}
-        resizeMode="cover"
-      />
-    );
+  if (!thumbUrl || chunk.is_live || chunk.id === '__live__') {
+    return <View style={styles.rawChunkThumb} />;
+  }
+
+  if (failed) {
+    return <View style={styles.rawChunkThumb} />;
   }
 
   return (
-    <View style={styles.rawChunkThumb}>
-      {loading && (
-        <Animated.View style={styles.thumbShimmer} />
-      )}
-    </View>
+    <Image
+      source={{ uri: thumbUrl }}
+      style={styles.rawChunkThumb}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
   );
 };
 
@@ -381,7 +397,7 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [showVideoOverlay, setShowVideoOverlay] = useState(false);
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
-  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'alerts', 'history', 'timeline', 'rawFootage'
+  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'autopilot', 'history', 'timeline', 'rawFootage', 'payments'
   const [timeFilter, setTimeFilter] = useState('Last 24 hours');
   const [selectedDate, setSelectedDate] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
@@ -390,6 +406,54 @@ export default function App() {
   const [rawChunks, setRawChunks] = useState([]);
   const [selectedRawChunkIds, setSelectedRawChunkIds] = useState([]);
   const [lockedRawChunkIds, setLockedRawChunkIds] = useState(null);
+  const [rawJobProgress, setRawJobProgress] = useState(null); // { total, completed } when job running
+  const [rtspErrorStatus, setRtspErrorStatus] = useState(null); // { rtsp_error, rtsp_error_message } when RTSP failed after 10 retries
+  const [billingState, setBillingState] = useState(null);
+
+  // Poll system status for RTSP error when logged in
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setRtspErrorStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const s = await systemApi.getStartupStatus();
+        if (!cancelled && s && s.rtsp_error) {
+          setRtspErrorStatus(s);
+        } else if (!cancelled) {
+          setRtspErrorStatus(null);
+        }
+      } catch {
+        if (!cancelled) setRtspErrorStatus(null);
+      }
+    };
+    poll();
+    const id = setInterval(poll, 30000); // every 30s
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isLoggedIn]);
+
+  // Load billing state when logged in
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setBillingState(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const s = await billingApi.getState();
+        if (!cancelled) setBillingState(s);
+      } catch (e) {
+        if (!cancelled) setBillingState(null);
+      }
+    };
+    load();
+  }, [isLoggedIn]);
 
   // Initialize tunnel URL and check auth after splash finishes
   const handleSplashFinish = async () => {
@@ -652,44 +716,68 @@ export default function App() {
         setLockedRawChunkIds(chunkIdsToUse);
       }
 
-      const response = await rawFootageApi.queryChunks(queryText, chunkIdsToUse);
+      // Use job-based API so results stream in one at a time (like Raw Footage page)
+      const start = await rawFootageApi.startJob(queryText, chunkIdsToUse);
+      setRawJobProgress({ total: start.total_chunks, completed: 0 });
+      let lastResultsCount = 0;
+      let done = false;
 
-      if (response.results && response.results.length > 0) {
-        response.results.forEach((result, index) => {
-          const timestamps = result.analysis ? parseTimestamps(result.analysis) : [];
-          const localPath = result.local_path;
-          const videoUrl = result.video_url;
-
-          const videoMessage = {
-            id: Date.now() + index * 2,
-            type: 'video',
-            title: `Raw footage ${index + 1}`,
-            timestamp: new Date().toISOString(),
-            location: localPath || videoUrl,
-            videoUrl,
-            localPath,
-            timestamps,
-          };
-          setMessages(prev => [...prev, videoMessage]);
-
-          setMessages(prev => [
-            ...prev,
-            {
-              id: Date.now() + index * 2 + 1,
-              type: 'llm',
-              analysis: result.analysis || result.error || 'No analysis available',
-            },
-          ]);
+      while (!done) {
+        const status = await rawFootageApi.getJob(start.job_id);
+        setRawJobProgress({
+          total: status.total_chunks,
+          completed: status.completed_chunks ?? (status.results?.length ?? 0),
         });
-      } else {
-        setMessages(prev => [
-          ...prev,
-          {
-            id: Date.now(),
-            type: 'llm',
-            analysis: 'No relevant raw footage found for your query.',
-          },
-        ]);
+        const results = status.results || [];
+
+        // Append any new results as they arrive (video + llm pair per chunk)
+        if (results.length > lastResultsCount) {
+          for (let index = lastResultsCount; index < results.length; index++) {
+            const result = results[index];
+            const timestamps = result.analysis ? parseTimestamps(result.analysis) : [];
+            const localPath = result.local_path;
+            const videoUrl = result.video_url;
+
+            const videoMessage = {
+              id: Date.now() + index * 2,
+              type: 'video',
+              title: `Raw footage ${index + 1}`,
+              timestamp: new Date().toISOString(),
+              location: localPath || videoUrl,
+              videoUrl,
+              localPath,
+              timestamps,
+            };
+            setMessages(prev => [...prev, videoMessage]);
+            setMessages(prev => [
+              ...prev,
+              {
+                id: Date.now() + index * 2 + 1,
+                type: 'llm',
+                analysis: result.analysis || result.error || 'No analysis available',
+              },
+            ]);
+          }
+          lastResultsCount = results.length;
+        }
+
+        if (status.status === 'completed' || status.status === 'failed') {
+          done = true;
+          if (lastResultsCount === 0) {
+            setMessages(prev => [
+              ...prev,
+              {
+                id: Date.now(),
+                type: 'llm',
+                analysis: status.status === 'failed'
+                  ? (status.error || 'Analysis failed.')
+                  : 'No relevant raw footage found for your query.',
+              },
+            ]);
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
       }
     } catch (error) {
       if (error.code === 'TOKEN_EXPIRED' || error.message?.includes('Token expired')) {
@@ -713,6 +801,7 @@ export default function App() {
       ]);
     } finally {
       setIsLoading(false);
+      setRawJobProgress(null);
       saveChatHistory();
     }
   };
@@ -807,12 +896,32 @@ export default function App() {
   const isFirstTime = messages.length === 0;
 
   // Render non-chat pages fullscreen (outside KeyboardAvoidingView)
-  if (currentPage === 'alerts') {
+  if (currentPage === 'autopilot') {
     return (
       <>
-        <AlertsPage
+        <AutopilotPage
           onBack={() => {
             resetChatSession();
+            setCurrentPage('chat');
+          }}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentPage === 'payments') {
+    return (
+      <>
+        <PaymentsPage
+          onBack={() => {
             setCurrentPage('chat');
           }}
         />
@@ -950,6 +1059,39 @@ export default function App() {
               <Text style={styles.timeFilterText}>{timeFilter}</Text>
             )}
           </View>
+          {rtspErrorStatus?.rtsp_error && (
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert(
+                  'RTSP stream disconnected',
+                  rtspErrorStatus.rtsp_error_message || 'The RTSP stream could not be restored after 10 attempts. Would you like to retry?',
+                  [
+                    { text: 'Dismiss', style: 'cancel' },
+                    {
+                      text: 'Retry',
+                      onPress: async () => {
+                        try {
+                          const res = await systemApi.rtspRetry();
+                          const s = await systemApi.getStartupStatus();
+                          if (s && !s.rtsp_error) setRtspErrorStatus(null);
+                          if (res?.success) {
+                            Alert.alert('Success', res.message || 'RTSP recovery started.');
+                          } else {
+                            Alert.alert('Retry failed', res?.message || 'Could not start recovery.');
+                          }
+                        } catch (e) {
+                          Alert.alert('Error', e.message || 'Retry failed');
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+              style={styles.rtspWarningButton}
+            >
+              <Ionicons name="warning" size={22} color="#dc2626" />
+            </TouchableOpacity>
+          )}
           {currentPage === 'chat' && (
             <TouchableOpacity
               onPress={async () => {
@@ -962,7 +1104,7 @@ export default function App() {
               <Ionicons name="calendar-outline" size={20} color="#6b7280" />
             </TouchableOpacity>
           )}
-          {currentPage !== 'chat' && <View style={styles.menuButton} />}
+          {currentPage !== 'chat' && !rtspErrorStatus?.rtsp_error && <View style={styles.menuButton} />}
         </View>
 
         {currentPage === 'chat' && (
@@ -1005,12 +1147,7 @@ export default function App() {
                         .map(chunk => {
                           const isSelected = selectedRawChunkIds.includes(chunk.id);
                           const isLive = !!chunk.is_live;
-                          const endDate = new Date(`${chunk.date}T${chunk.time}`);
-                          const timeLabel = endDate.toLocaleTimeString([], {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                          });
-
+                          const timeLabel = formatChunkTimeRange(chunk);
                           const disabled = !!lockedRawChunkIds && lockedRawChunkIds.length > 0;
 
                           return (
@@ -1049,11 +1186,17 @@ export default function App() {
                   {messages.map((msg, index) => renderMessage(msg, index))}
                   {isLoading && (
                     <View style={styles.loadingContainer}>
-                      <View style={styles.loadingDots}>
-                        <View style={[styles.dot, styles.dot1]} />
-                        <View style={[styles.dot, styles.dot2]} />
-                        <View style={[styles.dot, styles.dot3]} />
-                      </View>
+                      {rawJobProgress && rawJobProgress.total > 0 ? (
+                        <Text style={styles.loadingProgressText}>
+                          Analyzing chunk {rawJobProgress.completed + 1} of {rawJobProgress.total}…
+                        </Text>
+                      ) : (
+                        <View style={styles.loadingDots}>
+                          <View style={[styles.dot, styles.dot1]} />
+                          <View style={[styles.dot, styles.dot2]} />
+                          <View style={[styles.dot, styles.dot3]} />
+                        </View>
+                      )}
                     </View>
                   )}
                 </ScrollView>
@@ -1206,6 +1349,12 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   filterButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rtspWarningButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
@@ -1441,6 +1590,11 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginBottom: 40,
     paddingHorizontal: 4,
+  },
+  loadingProgressText: {
+    fontSize: 14,
+    color: '#64748b',
+    paddingVertical: 12,
   },
   loadingDots: {
     flexDirection: 'row',

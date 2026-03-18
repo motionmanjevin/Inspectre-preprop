@@ -377,3 +377,66 @@ export const alertsApi = {
     return apiRequest(`/alerts/history?limit=${encodeURIComponent(String(limit))}`);
   },
 };
+
+/**
+ * Autopilot API
+ */
+export const autopilotApi = {
+  async getConfig() {
+    return apiRequest('/autopilot/config');
+  },
+
+  async setConfig({ prompt, range_start_iso, range_end_iso }) {
+    return apiRequest('/autopilot/config', {
+      method: 'PUT',
+      body: JSON.stringify({ prompt, range_start_iso, range_end_iso }),
+    });
+  },
+
+  async listResponses() {
+    const data = await apiRequest('/autopilot/responses');
+    return data.results || [];
+  },
+
+  async getResponse(chunkId) {
+    return apiRequest(`/autopilot/responses/${encodeURIComponent(chunkId)}`);
+  },
+};
+
+/**
+ * System API (startup status, RTSP retry)
+ */
+export const systemApi = {
+  /**
+   * Get system startup status (includes rtsp_error, rtsp_error_message)
+   */
+  async getStartupStatus() {
+    return apiRequest('/system/startup-status');
+  },
+
+  /**
+   * Retry RTSP recovery (optionally with new URL)
+   */
+  async rtspRetry(newRtspUrl = null) {
+    return apiRequest('/system/rtsp-retry', {
+      method: 'POST',
+      body: JSON.stringify(newRtspUrl ? { new_rtsp_url: newRtspUrl } : {}),
+    });
+  },
+};
+
+/**
+ * Billing API
+ */
+export const billingApi = {
+  async getState() {
+    return apiRequest('/billing/state');
+  },
+
+  async startCheckout(productId) {
+    return apiRequest('/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ product_id: productId }),
+    });
+  },
+};

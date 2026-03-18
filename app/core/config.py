@@ -62,8 +62,15 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
+    # Storage Retention Defaults
+    LOCAL_STORAGE_MAX_GB: float = 50.0
+    R2_MAX_GB: float = 10.0
+
     # Database Settings
     DATABASE_URL: str = "sqlite:///./users.db"
+
+    # Payments / Billing Settings
+    PAYMENTS_API_BASE_URL: str = os.getenv("PAYMENTS_API_BASE_URL", "http://localhost:8100")
     
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

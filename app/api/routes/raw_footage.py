@@ -1,5 +1,6 @@
 """Raw footage API: list 1-hour chunks, serve video, query selected chunks with Qwen VL."""
 import logging
+import subprocess
 import threading
 import uuid
 from datetime import datetime
@@ -30,10 +31,27 @@ class RawFootageItem(BaseModel):
     date: str = Field(..., description="Date YYYY-MM-DD from filename")
     time: str = Field(..., description="Time HH:MM:SS from filename")
     size_bytes: int = Field(0, description="File size in bytes")
+    duration_seconds: float = Field(0, description="Duration of the video in seconds")
     video_url: str = Field(..., description="R2 public URL for playback/analysis")
     is_live: bool = Field(False, description="Whether this item represents the current in-progress hour")
     segments_done: int = Field(0, description="Number of 1-minute segments recorded so far (for live item)")
     segments_total: int = Field(60, description="Total segments per hour (typically 60)")
+
+
+def _get_video_duration(path: Path) -> float:
+    """Get video duration in seconds using ffprobe."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            import json
+            info = json.loads(result.stdout)
+            return float(info.get("format", {}).get("duration", 0))
+    except Exception:
+        pass
+    return 0
 
 
 class RawFootageListResponse(BaseModel):
@@ -102,6 +120,26 @@ def _r2_url_for_footage(filename: str) -> str:
     return f"{base}/raw_footage/{filename}" if base else ""
 
 
+def _ensure_footage_on_r2(filename: str, footage_dir: Path) -> str:
+    """
+    If the footage file exists locally but not on R2, upload it and return the R2 public URL.
+    Otherwise return the R2 URL (assumed already uploaded).
+    """
+    local_path = footage_dir / filename
+    object_key = f"raw_footage/{filename}"
+    if not local_path.exists():
+        return _r2_url_for_footage(filename)
+    try:
+        from app.main import get_r2_uploader
+        r2 = get_r2_uploader()
+        if not r2.object_exists(object_key):
+            r2.upload_file(str(local_path), object_key=object_key)
+            logger.info("Uploaded local raw footage to R2 for query: %s", object_key)
+    except Exception as e:
+        logger.warning("Could not ensure footage on R2 (%s): %s", filename, e)
+    return _r2_url_for_footage(filename)
+
+
 def get_live_raw_segments_state() -> tuple[bool, int, int]:
     """
     Lazy proxy to avoid import-time circular dependency with app.main.
@@ -157,8 +195,8 @@ def _process_raw_chunks(
                     per_result(result)
                 continue
         else:
-            # Resolve to R2 URL (preferred for Qwen) or local path
-            video_url = _r2_url_for_footage(chunk_id)
+            # Ensure chunk is on R2 (upload from local if saved with "reliable internet" off)
+            video_url = _ensure_footage_on_r2(chunk_id, footage_dir)
             if not video_url and settings.R2_PUBLIC_URL_BASE:
                 video_url = f"{settings.R2_PUBLIC_URL_BASE.rstrip('/')}/raw_footage/{chunk_id}"
             local_path = footage_dir / chunk_id if (footage_dir / chunk_id).exists() else None
@@ -248,6 +286,123 @@ def _start_raw_query_job(job: RawQueryJob) -> None:
     thread.start()
 
 
+# --- Autopilot: run fixed query on each chunk in time range as it is finalized ---
+
+
+def maybe_run_autopilot_for_chunk(filename: str) -> None:
+    """If autopilot is active and chunk is in range and not yet processed, run analysis in background."""
+    from app.services import autopilot_service
+
+    if not autopilot_service.get_config():
+        logger.debug("Autopilot skip %s: no config", filename)
+        return
+    if not autopilot_service.chunk_in_autopilot_range(filename):
+        logger.info("Autopilot skip %s: chunk not in configured time range", filename)
+        return
+    if autopilot_service.has_result_for_chunk(filename):
+        logger.debug("Autopilot skip %s: already has result", filename)
+        return
+    logger.info("Autopilot starting for chunk %s", filename)
+    thread = threading.Thread(
+        target=_run_autopilot_for_chunk,
+        args=(filename,),
+        daemon=True,
+        name="AutopilotChunk",
+    )
+    thread.start()
+
+
+def _run_autopilot_for_chunk(filename: str) -> None:
+    """Upload chunk to R2 if needed, run autopilot query, store result. Retries on failure are handled by caller (reconnect/startup)."""
+    from datetime import timedelta
+
+    from app.services import autopilot_service
+
+    settings = get_settings()
+    footage_dir = Path(settings.RAW_FOOTAGE_DIR)
+    cfg = autopilot_service.get_config()
+    if not cfg:
+        return
+    if autopilot_service.has_result_for_chunk(filename):
+        return
+    prompt = cfg["prompt"]
+    video_url = _ensure_footage_on_r2(filename, footage_dir)
+    if not video_url:
+        video_url = _r2_url_for_footage(filename)
+    local_path = footage_dir / filename
+    duration = _get_video_duration(local_path) if local_path.exists() else 3600.0
+    start_iso = autopilot_service.chunk_start_iso_from_filename(filename) or ""
+    start_dt = None
+    if start_iso:
+        try:
+            start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    end_iso = ""
+    if start_dt:
+        end_dt = start_dt + timedelta(seconds=duration)
+        end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+    try:
+        qwen_client = _get_qwen_client()
+        analysis_output = qwen_client.analyze_video_flash(
+            video_url=video_url,
+            user_query=prompt,
+            fps=settings.VIDEO_FPS,
+        )
+        autopilot_service.add_result(
+            chunk_id=filename,
+            prompt=prompt,
+            analysis=analysis_output,
+            error=None,
+            video_url=video_url,
+            chunk_start_iso=start_iso,
+            chunk_end_iso=end_iso,
+        )
+        logger.info("Autopilot completed for %s", filename)
+    except QwenAPIError as e:
+        logger.warning("Autopilot Qwen failed for %s: %s", filename, e)
+        autopilot_service.add_result(
+            chunk_id=filename,
+            prompt=prompt,
+            analysis=None,
+            error=str(e),
+            video_url=video_url or "",
+            chunk_start_iso=start_iso,
+            chunk_end_iso=end_iso,
+        )
+    except Exception as e:
+        logger.exception("Autopilot failed for %s", filename)
+        autopilot_service.add_result(
+            chunk_id=filename,
+            prompt=prompt,
+            analysis=None,
+            error=str(e),
+            video_url=video_url or "",
+            chunk_start_iso=start_iso,
+            chunk_end_iso=end_iso,
+        )
+
+
+def process_pending_autopilot_chunks() -> None:
+    """Process all chunks in the autopilot time range that do not yet have a result (e.g. after reconnect or startup)."""
+    from app.services import autopilot_service
+
+    cfg = autopilot_service.get_config()
+    if not cfg:
+        return
+    settings = get_settings()
+    footage_dir = Path(settings.RAW_FOOTAGE_DIR)
+    if not footage_dir.exists():
+        return
+    pending = []
+    for path in footage_dir.glob("footage_*.mp4"):
+        name = path.name
+        if autopilot_service.chunk_in_autopilot_range(name) and not autopilot_service.has_result_for_chunk(name):
+            pending.append(name)
+    for filename in pending:
+        maybe_run_autopilot_for_chunk(filename)
+
+
 @router.get("/footage", response_model=RawFootageListResponse)
 async def list_footage(
     current_user: dict = Depends(get_current_user)
@@ -276,6 +431,7 @@ async def list_footage(
         if len(time_str) == 6:
             time_str = f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
         video_url = _r2_url_for_footage(name)
+        duration = _get_video_duration(path)
         items.append(
             RawFootageItem(
                 id=name,
@@ -283,6 +439,7 @@ async def list_footage(
                 date=date_str,
                 time=time_str,
                 size_bytes=size_bytes,
+                duration_seconds=duration,
                 video_url=video_url,
             )
         )
@@ -351,6 +508,61 @@ async def get_raw_video(
             "Accept-Ranges": "bytes",
             "Content-Disposition": f'inline; filename="{video_path.name}"',
         },
+    )
+
+
+@router.get("/thumbnails/{file_path:path}")
+async def get_raw_thumbnail(
+    file_path: str,
+    request: Request,
+    token: str | None = None,
+):
+    """Serve a cached JPEG thumbnail for a raw footage file. Generated on first request via FFmpeg."""
+    raw_token: str | None = token
+    if not raw_token:
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            raw_token = auth_header.split(" ", 1)[1].strip()
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+    AuthService().verify_token(raw_token)
+
+    settings = get_settings()
+    footage_dir = Path(settings.RAW_FOOTAGE_DIR).resolve()
+    video_path = (footage_dir / file_path).resolve()
+    try:
+        video_path.relative_to(footage_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Invalid file path")
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    thumbs_dir = footage_dir / ".thumbs"
+    thumbs_dir.mkdir(exist_ok=True)
+    thumb_path = thumbs_dir / f"{video_path.stem}.jpg"
+
+    if not thumb_path.exists():
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", "1",
+                "-i", str(video_path),
+                "-frames:v", "1",
+                "-vf", "scale=320:-1",
+                "-q:v", "5",
+                str(thumb_path),
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=10)
+        except Exception as exc:
+            logger.warning("Thumbnail generation failed for %s: %s", file_path, exc)
+
+    if not thumb_path.exists():
+        raise HTTPException(status_code=500, detail="Failed to generate thumbnail")
+
+    return FileResponse(
+        thumb_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 

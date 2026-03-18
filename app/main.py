@@ -43,17 +43,21 @@ app.add_middleware(
 )
 
 # Include routers (import recording after chunk_callback is defined)
-from app.api.routes import recording, videos, alerts, auth, tunnel, raw_footage
+from app.api.routes import recording, videos, alerts, auth, tunnel, raw_footage, system, device_config, autopilot, billing
 
 app.include_router(health.router)  # Public endpoint
 app.include_router(auth.router)  # Public endpoints (register/login)
+app.include_router(system.router)  # Public (startup status)
+app.include_router(device_config.router)
 app.include_router(recording.router)
 app.include_router(search.router)
 app.include_router(analysis.router)
 app.include_router(videos.router)
 app.include_router(alerts.router)
+app.include_router(autopilot.router)
 app.include_router(tunnel.router)
 app.include_router(raw_footage.router)
+app.include_router(billing.router)
 
 # Initialize services (singleton pattern)
 _qwen_client: Optional[QwenVLClient] = None
@@ -111,11 +115,35 @@ def get_alert_service() -> AlertService:
     return _alert_service
 
 
+def _on_tunnel_url_change(old_url, new_url):
+    """Called when the Cloudflare tunnel URL changes (or is first discovered)."""
+    from app.core.system_state import system_state
+    system_state.tunnel_url = new_url
+    try:
+        from app.services.device_config_service import get_device_config, set_last_tunnel_url
+        from app.services.email_service import EmailService
+        from app.core.startup_orchestrator import get_primary_user_email
+
+        cfg = get_device_config() or {}
+        last_url = cfg.get("last_tunnel_url", "")
+        if new_url != last_url:
+            set_last_tunnel_url(new_url)
+            email_svc = EmailService.from_device_config(cfg)
+            user_email = get_primary_user_email()
+            if email_svc and user_email:
+                email_svc.send_tunnel_link(user_email, new_url)
+    except Exception as e:
+        logger.warning("Tunnel URL change handler error: %s", e)
+
+
 def get_tunnel_manager() -> TunnelManager:
     """Get or create TunnelManager instance."""
     global _tunnel_manager
     if _tunnel_manager is None:
-        _tunnel_manager = TunnelManager(local_url="http://localhost:8000")
+        _tunnel_manager = TunnelManager(
+            local_url="http://localhost:8000",
+            on_url_change=_on_tunnel_url_change,
+        )
     return _tunnel_manager
 
 
@@ -125,6 +153,12 @@ tunnel.set_tunnel_manager_getter(get_tunnel_manager)
 # Raw footage: accumulate 1-min segments, concat every 60 into one hour file
 _raw_segment_lock = threading.Lock()
 _raw_segment_paths: List[str] = []
+_raw_auto_upload: bool = True
+
+
+def set_raw_auto_upload(enabled: bool) -> None:
+    global _raw_auto_upload
+    _raw_auto_upload = enabled
 
 # Temporary raw query concats (live footage queries)
 _temp_raw_lock = threading.Lock()
@@ -277,14 +311,15 @@ def raw_chunk_callback(chunk_path: str) -> None:
             return
         logger.info(f"Raw footage concatenated: {out_path}")
 
-        # Upload the 1-hour file to R2 for playback/query
-        try:
-            r2 = get_r2_uploader()
-            object_key = f"raw_footage/{out_name}"
-            r2.upload_file(str(out_path), object_key=object_key)
-            logger.info(f"Raw footage uploaded: {object_key}")
-        except Exception as e:
-            logger.warning(f"Raw footage upload failed: {e}")
+        # Upload the 1-hour file to R2 only when reliable internet (auto-upload) is on
+        if _raw_auto_upload:
+            try:
+                r2 = get_r2_uploader()
+                object_key = f"raw_footage/{out_name}"
+                r2.upload_file(str(out_path), object_key=object_key)
+                logger.info(f"Raw footage uploaded: {object_key}")
+            except Exception as e:
+                logger.warning(f"Raw footage upload failed: {e}")
 
         # Delete the 60 segment files to free space
         for p in to_concat:
@@ -292,6 +327,13 @@ def raw_chunk_callback(chunk_path: str) -> None:
                 Path(p).unlink(missing_ok=True)
             except Exception as e:
                 logger.debug(f"Could not delete segment {p}: {e}")
+
+        # Autopilot: run query on this chunk if in range (runs as soon as chunk is done)
+        try:
+            from app.api.routes import raw_footage
+            raw_footage.maybe_run_autopilot_for_chunk(out_name)
+        except Exception as e:
+            logger.debug("Autopilot trigger skipped: %s", e)
 
     thread = threading.Thread(target=do_raw_processing, daemon=True, name="RawChunkProcessor")
     thread.start()
@@ -315,11 +357,17 @@ def flush_raw_segments() -> None:
     out_path = footage_dir / out_name
     if _concat_segments(to_concat, str(out_path)):
         logger.info(f"Raw footage partial concatenated: {out_path}")
+        if _raw_auto_upload:
+            try:
+                r2 = get_r2_uploader()
+                r2.upload_file(str(out_path), object_key=f"raw_footage/{out_name}")
+            except Exception as e:
+                logger.warning(f"Raw partial upload failed: {e}")
         try:
-            r2 = get_r2_uploader()
-            r2.upload_file(str(out_path), object_key=f"raw_footage/{out_name}")
+            from app.api.routes import raw_footage
+            raw_footage.maybe_run_autopilot_for_chunk(out_name)
         except Exception as e:
-            logger.warning(f"Raw partial upload failed: {e}")
+            logger.debug("Autopilot trigger skipped: %s", e)
         for p in to_concat:
             try:
                 Path(p).unlink(missing_ok=True)
@@ -354,10 +402,14 @@ def chunk_callback(chunk_path: str) -> None:
             ]
             
             # Process with Qwen 3 VL Plus (with alerts injected)
+            # Use video_preprompt from device config if available, otherwise fall back to .env
+            from app.services.device_config_service import get_device_config
+            _dcfg = get_device_config()
+            preprompt = (_dcfg or {}).get("video_preprompt", "").strip() or settings.VIDEO_PREPROMPT
             qwen_client = get_qwen_client()
             analysis = qwen_client.process_video_plus(
                 video_url=public_url,
-                preprompt=settings.VIDEO_PREPROMPT,
+                preprompt=preprompt,
                 fps=settings.VIDEO_FPS,
                 alerts=alerts_for_qwen if alerts_for_qwen else None
             )
@@ -418,37 +470,15 @@ def chunk_callback(chunk_path: str) -> None:
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services on startup."""
+    """Initialize services on startup using the orchestrated startup sequence."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    
-    # Validate configuration
+
     if not settings.QWEN_API_KEY:
         logger.warning("QWEN_API_KEY not set")
-    
-    # Try to initialize services
-    try:
-        get_chroma_store()
-        logger.info("ChromaDB initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize ChromaDB: {str(e)}")
-    
-    try:
-        get_r2_uploader()
-        logger.info("R2 uploader initialized")
-    except Exception as e:
-        logger.warning(f"R2 uploader not available: {str(e)}")
-    
-    # Start Cloudflare tunnel for mobile access
-    try:
-        tunnel_manager = get_tunnel_manager()
-        tunnel_url = tunnel_manager.start_tunnel()
-        logger.info(f"Cloudflare tunnel started: {tunnel_url}")
-    except VideoRecordingError as e:
-        logger.warning(f"Cloudflare tunnel not available: {str(e)}")
-        logger.warning("Mobile app pairing will not be available. Install cloudflared to enable.")
-    except Exception as e:
-        logger.warning(f"Failed to start tunnel: {str(e)}")
-    
+
+    from app.core.startup_orchestrator import run_startup_sequence
+    run_startup_sequence()
+
     logger.info("Application startup complete")
 
 
@@ -456,6 +486,22 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info("Shutting down application")
+
+    # Flush any remaining raw segments before shutting down
+    try:
+        flush_raw_segments()
+    except Exception as e:
+        logger.warning(f"Error flushing raw segments on shutdown: {e}")
+
+    # Persist that recording was active so we can resume on next start
+    from app.api.routes.recording import get_video_recorder, _raw_recording_active
+    from app.services.device_config_service import set_recording_active
+    recorder = get_video_recorder()
+    if recorder and recorder.is_recording and _raw_recording_active:
+        set_recording_active(True)
+    else:
+        set_recording_active(False)
+
     # Stop tunnel
     global _tunnel_manager
     if _tunnel_manager is not None:

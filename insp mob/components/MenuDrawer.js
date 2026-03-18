@@ -66,10 +66,10 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
       page: 'rawFootage',
     },
     {
-      id: 'alerts',
-      label: 'Alerts',
-      icon: 'notifications-outline',
-      page: 'alerts',
+      id: 'autopilot',
+      label: 'Autopilot',
+      icon: 'airplane-outline',
+      page: 'autopilot',
     },
     {
       id: 'history',
@@ -82,6 +82,12 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
       label: 'Processing Timeline',
       icon: 'bar-chart-outline',
       page: 'timeline',
+    },
+    {
+      id: 'payments',
+      label: 'Payments',
+      icon: 'card-outline',
+      page: 'payments',
     },
   ];
 

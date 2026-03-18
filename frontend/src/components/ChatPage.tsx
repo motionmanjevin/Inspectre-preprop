@@ -1,6 +1,13 @@
 import { Send, Search, X, Clock } from "lucide-react";
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
-import { searchApi, analysisApi, ClipInfo, getAuthToken } from "../services/api";
+import {
+  searchApi,
+  analysisApi,
+  ClipInfo,
+  getAuthToken,
+  rawFootageApi,
+  type RawFootageItem,
+} from "../services/api";
 
 interface Message {
   id: string;
@@ -44,6 +51,9 @@ export const ChatPage = forwardRef<{
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timeFilterRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [rawChunks, setRawChunks] = useState<RawFootageItem[]>([]);
+  const [selectedRawChunkIds, setSelectedRawChunkIds] = useState<string[]>([]);
+  const [rawJobProgress, setRawJobProgress] = useState<{ total: number; completed: number } | null>(null);
 
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
@@ -72,6 +82,20 @@ export const ChatPage = forwardRef<{
     scrollToBottom();
   }, [messages]);
 
+  // Load raw footage chunks for quick-select carousel (mirrors mobile home)
+  useEffect(() => {
+    const loadFootage = async () => {
+      try {
+        const res = await rawFootageApi.list();
+        setRawChunks(res.chunks || []);
+      } catch (e) {
+        console.error("Failed to load raw footage chunks:", e);
+        setRawChunks([]);
+      }
+    };
+    loadFootage();
+  }, []);
+
   // Fetch available dates when time filter dropdown opens
   useEffect(() => {
     if (showTimeFilter && availableDates.length === 0) {
@@ -88,6 +112,51 @@ export const ChatPage = forwardRef<{
       console.error("Failed to fetch available dates:", error);
     } finally {
       setLoadingDates(false);
+    }
+  };
+
+  const toggleRawChunkSelection = (id: string) => {
+    setSelectedRawChunkIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const formatRawChunkTimeRange = (chunk: RawFootageItem): string => {
+    try {
+      const startDate = new Date(`${chunk.date}T${chunk.time}`);
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const chunkDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+
+      let datePrefix = "";
+      if (chunkDay.getTime() === today.getTime()) {
+        datePrefix = "Today, ";
+      } else if (chunkDay.getTime() === yesterday.getTime()) {
+        datePrefix = "Yesterday, ";
+      } else if (startDate.getFullYear() === now.getFullYear()) {
+        datePrefix = startDate.toLocaleDateString([], { month: "short", day: "numeric" }) + ", ";
+      } else {
+        datePrefix = startDate.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) + ", ";
+      }
+
+      const fmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+      const startLabel = startDate.toLocaleTimeString([], fmt);
+      let endLabel: string;
+      if (chunk.is_live) {
+        endLabel = "now";
+      } else {
+        const durMs =
+          typeof chunk.duration_seconds === "number" && chunk.duration_seconds > 0
+            ? chunk.duration_seconds * 1000
+            : 60 * 60 * 1000;
+        const endDate = new Date(startDate.getTime() + durMs);
+        endLabel = endDate.toLocaleTimeString([], fmt);
+      }
+      return `${datePrefix}${startLabel} – ${endLabel}`;
+    } catch {
+      return chunk.time || "–";
     }
   };
 
@@ -229,63 +298,124 @@ export const ChatPage = forwardRef<{
     setIsTyping(true);
 
     try {
-      // Determine target date for the query
-      const targetDate = selectedDate || undefined;
-      
-      // Call analysis API
-      const response = await analysisApi.analyze(queryText, 5, targetDate);
-      
-      if (response.results.length === 0) {
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: `No videos found matching your query in ${timeFilter}. Try adjusting your search or selecting a different date.`,
-          sender: "bot",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, botMessage]);
-      } else {
-        // Combine all analysis results
-        const successfulResults = response.results.filter(r => r.analysis);
-        const failedResults = response.results.filter(r => r.error);
+      // If user has selected raw footage chunks, run a raw footage job (mobile-style flow)
+      if (selectedRawChunkIds.length > 0) {
+        const trimmed = queryText.trim();
+        setRawJobProgress(null);
 
-        let responseText = "";
-        if (successfulResults.length > 0) {
-          responseText = successfulResults.map((r, i) => {
-            return `**Video ${i + 1}:**\n${r.analysis}`;
-          }).join("\n\n---\n\n");
-        }
-        
-        if (failedResults.length > 0) {
-          responseText += `\n\n(${failedResults.length} video(s) could not be analyzed)`;
-        }
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-        const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-        const token = getAuthToken();
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: responseText || "Analysis complete but no insights available.",
-          sender: "bot",
-          timestamp: new Date(),
-          videoResults: response.results
-            .filter(r => r.video_url)
-            .map(r => {
-              // Parse timestamps from analysis text
-              const timestamps = r.analysis ? parseTimestamps(r.analysis) : [];
-              
-              // Use local endpoint if local_path exists, otherwise fallback to R2 URL
-              const videoUrl = r.local_path 
-                ? `${API_BASE_URL}/videos/${encodeURIComponent(String(r.local_path))}${token ? `?token=${encodeURIComponent(token)}` : ""}`
-                : r.video_url;
-              return {
-                camera: "Analyzed Video",
-                timestamp: new Date().toLocaleString(),
-                description: r.analysis || "Video analyzed",
-                videoUrl: videoUrl,
-                timestamps: timestamps
+        try {
+          const start = await rawFootageApi.startJob(trimmed, selectedRawChunkIds);
+          setRawJobProgress({ total: start.total_chunks, completed: 0 });
+
+          let done = false;
+          let finalText = "";
+
+          while (!done) {
+            const status = await rawFootageApi.getJob(start.job_id);
+            setRawJobProgress({
+              total: status.total_chunks,
+              completed: status.completed_chunks,
+            });
+
+            if (status.status === "completed" || status.status === "failed") {
+              done = true;
+
+              const successful = status.results.filter(r => r.analysis);
+              const failed = status.results.filter(r => r.error);
+
+              if (successful.length > 0) {
+                finalText = successful
+                  .map((r, idx) => `**Chunk ${idx + 1}:**\n${r.analysis}`)
+                  .join("\n\n---\n\n");
+              }
+              if (failed.length > 0) {
+                finalText += `\n\n(${failed.length} chunk(s) could not be analyzed)`;
+              }
+              if (!finalText) {
+                finalText = "No analysis results for the selected chunks.";
+              }
+              const botMessage: Message = {
+                id: (Date.now() + 1).toString(),
+                text: finalText,
+                sender: "bot",
+                timestamp: new Date(),
               };
-            })
-        };
-        setMessages((prev) => [...prev, botMessage]);
+              setMessages(prev => [...prev, botMessage]);
+            } else {
+              await sleep(2000);
+            }
+          }
+        } catch (e) {
+          console.error("Raw footage analysis error:", e);
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: `Sorry, I couldn't analyze the selected raw footage. ${
+              e instanceof Error ? e.message : "Please try again."
+            }`,
+            sender: "bot",
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, botMessage]);
+        } finally {
+          setRawJobProgress(null);
+        }
+      } else {
+        // Otherwise, use the existing analysis flow (searching processed clips)
+        const targetDate = selectedDate || undefined;
+        const response = await analysisApi.analyze(queryText, 5, targetDate);
+
+        if (response.results.length === 0) {
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: `No videos found matching your query in ${timeFilter}. Try adjusting your search or selecting a different date.`,
+            sender: "bot",
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, botMessage]);
+        } else {
+          const successfulResults = response.results.filter(r => r.analysis);
+          const failedResults = response.results.filter(r => r.error);
+
+          let responseText = "";
+          if (successfulResults.length > 0) {
+            responseText = successfulResults.map((r, i) => {
+              return `**Video ${i + 1}:**\n${r.analysis}`;
+            }).join("\n\n---\n\n");
+          }
+
+          if (failedResults.length > 0) {
+            responseText += `\n\n(${failedResults.length} video(s) could not be analyzed)`;
+          }
+
+          const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+          const token = getAuthToken();
+          const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            text: responseText || "Analysis complete but no insights available.",
+            sender: "bot",
+            timestamp: new Date(),
+            videoResults: response.results
+              .filter(r => r.video_url)
+              .map(r => {
+                const timestamps = r.analysis ? parseTimestamps(r.analysis) : [];
+                const videoUrl = r.local_path
+                  ? `${API_BASE_URL}/videos/${encodeURIComponent(String(r.local_path))}${
+                      token ? `?token=${encodeURIComponent(token)}` : ""
+                    }`
+                  : r.video_url;
+                return {
+                  camera: "Analyzed Video",
+                  timestamp: new Date().toLocaleString(),
+                  description: r.analysis || "Video analyzed",
+                  videoUrl,
+                  timestamps,
+                };
+              }),
+          };
+          setMessages((prev) => [...prev, botMessage]);
+        }
       }
     } catch (error) {
       console.error("Analysis error:", error);
@@ -488,6 +618,68 @@ export const ChatPage = forwardRef<{
           )}
         </div>
 
+        {/* Raw Footage Carousel (mirrors mobile quick-select flow) */}
+        {rawChunks.length > 0 && (
+          <div className="mt-14 mb-3 px-4">
+            <div className="text-sm text-gray-300 mb-2">
+              Select one or more raw footage chunks to analyze directly with your next message.
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-3 scrollbar-hide" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
+              {rawChunks
+                .filter(chunk => {
+                  const targetDate = selectedDate || "";
+                  if (!targetDate && timeFilter === "Last 24 hours") {
+                    try {
+                      const [y, m, d] = chunk.date.split("-").map(Number);
+                      const [hh, mm, ss] = chunk.time.split(":").map(Number);
+                      const end = new Date(y, m - 1, d, hh, mm, ss);
+                      const now = new Date();
+                      return now.getTime() - end.getTime() <= 24 * 60 * 60 * 1000;
+                    } catch {
+                      return true;
+                    }
+                  }
+                  if (targetDate) {
+                    return chunk.date === targetDate;
+                  }
+                  return true;
+                })
+                .map((chunk) => {
+                const selected = selectedRawChunkIds.includes(chunk.id);
+                const label = formatRawChunkTimeRange(chunk);
+                const isLive = !!chunk.is_live;
+                return (
+                  <button
+                    key={chunk.id}
+                    onClick={() => toggleRawChunkSelection(chunk.id)}
+                    className={[
+                      "min-w-[230px] max-w-xs rounded-2xl border px-4 py-3 text-left transition-colors shadow-[0_0_25px_rgba(0,255,136,0.12)] flex flex-col",
+                      selected
+                        ? "border-[#22c55e] bg-[#16a34a]/20"
+                        : "border-[#27272f] bg-[#020617] hover:border-[#22c55e] hover:bg-[#020817]",
+                    ].join(" ")}
+                  >
+                    <div className="text-xs text-gray-500 mb-1">
+                      {isLive ? "Live hour" : "Recorded hour"}
+                    </div>
+                    <div className="text-sm text-gray-100 font-medium">{label}</div>
+                    {isLive && (
+                      <div className="mt-1 text-xs font-semibold text-[#22c55e]">
+                        LIVE
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {rawJobProgress && (
+              <div className="mt-1 text-xs text-gray-500">
+                Analyzing selected chunks {rawJobProgress.completed + 1} of {rawJobProgress.total}…
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto py-8 px-4 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {messages.length === 0 && !isTyping ? (
@@ -593,7 +785,7 @@ export const ChatPage = forwardRef<{
         {/* Input Area */}
         <div className="flex-shrink-0 pb-6 px-4">
           <div className="max-w-3xl mx-auto">
-            <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-3xl p-2 flex items-end gap-2">
+            <div className="bg-[#050712] border border-[#1f2937] rounded-3xl p-2 flex items-end gap-2 shadow-[0_0_30px_rgba(0,255,136,0.08)]">
               <input
                 type="text"
                 value={input}
@@ -606,18 +798,18 @@ export const ChatPage = forwardRef<{
                 <button
                   onClick={handleSearch}
                   disabled={!input.trim() || isTyping}
-                  className="w-10 h-10 bg-transparent hover:bg-white/5 disabled:hover:bg-transparent disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors"
+                  className="w-10 h-10 bg-transparent hover:bg-[#00ff88]/10 disabled:hover:bg-transparent disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors"
                   title="Search video clips"
                 >
-                  <Search className={`w-5 h-5 ${input.trim() && !isTyping ? 'text-gray-400 hover:text-white' : 'text-gray-600'}`} />
+                  <Search className={`w-5 h-5 ${input.trim() && !isTyping ? 'text-[#00ff88]' : 'text-gray-600'}`} />
                 </button>
                 <button
                   onClick={handleSend}
                   disabled={!input.trim() || isTyping}
-                  className="w-10 h-10 bg-white hover:bg-gray-200 disabled:bg-[#1a1a1a] disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors"
+                  className="w-10 h-10 bg-[#00ff88] hover:bg-[#5bffb1] disabled:bg-[#1a1a1a] disabled:cursor-not-allowed rounded-full flex items-center justify-center transition-colors"
                   title="Analyze videos"
                 >
-                  <Send className={`w-5 h-5 ${input.trim() && !isTyping ? 'text-[#0a0a0a]' : 'text-gray-600'}`} />
+                  <Send className={`w-5 h-5 ${input.trim() && !isTyping ? 'text-[#020617]' : 'text-gray-600'}`} />
                 </button>
               </div>
             </div>

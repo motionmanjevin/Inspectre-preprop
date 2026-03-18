@@ -163,7 +163,8 @@ export const recordingApi = {
     chunkDuration?: number,
     motionDetectionEnabled?: boolean,
     motionThreshold?: number,
-    rawMode?: boolean
+    rawMode?: boolean,
+    rawAutoUpload?: boolean
   ): Promise<{ status: string; rtsp_url: string }> {
     return apiRequest('/recording/start', {
       method: 'POST',
@@ -173,6 +174,7 @@ export const recordingApi = {
         motion_detection_enabled: motionDetectionEnabled || false,
         motion_threshold: motionThreshold || 0.3,
         raw_mode: rawMode || false,
+        raw_auto_upload: rawMode ? (rawAutoUpload !== false) : undefined,
       }),
     });
   },
@@ -369,6 +371,7 @@ export interface RawFootageItem {
   is_live?: boolean;
   segments_done?: number;
   segments_total?: number;
+  duration_seconds?: number;
 }
 
 export interface RawFootageListResponse {
@@ -474,6 +477,75 @@ export const authApi = {
 };
 
 /**
+ * Device config API
+ */
+export interface DeviceConfig {
+  rtsp_url: string;
+  camera_name: string;
+  video_preprompt: string;
+  r2_account_id: string;
+  r2_access_key_id: string;
+  r2_secret_access_key: string;
+  r2_bucket_name: string;
+  r2_public_url_base: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_password: string;
+  smtp_from_address: string;
+  smtp_use_tls: boolean;
+  reliable_internet: boolean;
+  local_storage_max_gb: number;
+  r2_max_gb: number;
+}
+
+export const deviceConfigApi = {
+  async get(): Promise<DeviceConfig> {
+    return apiRequest<DeviceConfig>('/device-config');
+  },
+  async update(data: Partial<DeviceConfig>): Promise<DeviceConfig> {
+    return apiRequest<DeviceConfig>('/device-config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+/**
+ * System startup API
+ */
+export interface SystemStatus {
+  mode: string;
+  has_account: boolean;
+  has_device_config: boolean;
+  internet_available: boolean;
+  tunnel_url: string | null;
+  services_started: boolean;
+  decision_remaining_seconds: number;
+  rtsp_error: boolean;
+  rtsp_error_message: string;
+  rtsp_retry_count: number;
+}
+
+export const systemApi = {
+  async getStatus(): Promise<SystemStatus> {
+    return apiRequest<SystemStatus>('/system/startup-status');
+  },
+  async postDecision(decision: 'retry' | 'offline'): Promise<{ mode: string; message: string }> {
+    return apiRequest('/system/decision', {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    });
+  },
+  async rtspRetry(newRtspUrl?: string): Promise<{ success: boolean; message: string }> {
+    return apiRequest('/system/rtsp-retry', {
+      method: 'POST',
+      body: JSON.stringify({ new_rtsp_url: newRtspUrl || null }),
+    });
+  },
+};
+
+/**
  * Default export with all APIs
  */
 export default {
@@ -484,4 +556,6 @@ export default {
   alerts: alertsApi,
   auth: authApi,
   tunnel: tunnelApi,
+  deviceConfig: deviceConfigApi,
+  system: systemApi,
 };

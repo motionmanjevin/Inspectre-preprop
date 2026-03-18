@@ -1,4 +1,4 @@
-import { X, Settings, Home, RefreshCw, Archive, LogOut, Smartphone, Film } from "lucide-react";
+import { X, Settings, LogOut, Smartphone } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { searchApi, recordingApi, tunnelApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
@@ -7,7 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onNavigate: (page: "chat" | "settings" | "archives" | "footage") => void;
+  onNavigate: (page: "settings") => void;
   onRefreshChat: () => void;
   onLogout: () => void;
 }) {
@@ -177,21 +177,6 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
               <span className="text-xs text-gray-500">Scan QR code to pair device</span>
             </div>
           </button>
-
-          {/* Raw Footage */}
-          <button
-            onClick={() => onNavigate("footage")}
-            className="w-full flex items-center gap-3 p-4 hover:bg-[#1a1a1a] rounded-lg transition-colors border border-[#1a1a1a] hover:border-[#2a2a2a]"
-            title="Raw footage"
-          >
-            <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[#1a1a1a]">
-              <Film className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="flex-1 text-left">
-              <span className="text-sm font-medium text-white block">Raw Footage</span>
-              <span className="text-xs text-gray-500">Browse and query continuous recordings</span>
-            </div>
-          </button>
         </div>
 
         {/* Spacer */}
@@ -200,42 +185,14 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
         {/* Footer Info */}
         <div className="p-6 border-t border-[#1a1a1a] space-y-4">
           <div className="space-y-4">
-            {/* Navigation Buttons */}
+            {/* Settings Button (primary destination on web) */}
             <div className="flex gap-2 flex-wrap">
-              {/* Home Button */}
-              <button 
-                onClick={() => onNavigate("chat")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
-                title="Home"
-              >
-                <Home className="w-5 h-5 text-gray-400" />
-              </button>
-              
-              {/* Archives Button */}
-              <button 
-                onClick={() => onNavigate("archives")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
-                title="View archived conversations"
-              >
-                <Archive className="w-5 h-5 text-gray-400" />
-              </button>
-              
-              {/* Refresh Chat Button */}
-              <button 
-                onClick={onRefreshChat}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors group min-w-[60px]"
-                title="Clear chat messages"
-              >
-                <RefreshCw className="w-5 h-5 text-gray-400 group-hover:rotate-180 transition-transform duration-500" />
-              </button>
-              
-              {/* Settings Button */}
               <button 
                 onClick={() => onNavigate("settings")}
-                className="flex-1 flex items-center justify-center p-3 hover:bg-[#1a1a1a] rounded-lg transition-colors min-w-[60px]"
+                className="flex-1 flex items-center justify-center p-3 bg-[#111827] hover:bg-[#1f2937] rounded-lg transition-colors min-w-[60px]"
                 title="Settings"
               >
-                <Settings className="w-5 h-5 text-gray-400" />
+                <Settings className="w-5 h-5 text-gray-200" />
               </button>
             </div>
             

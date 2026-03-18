@@ -138,6 +138,7 @@
 
   body {
     line-height: inherit;
+    overflow-x: hidden; /* Prevent horizontal scrollbars in the app layout */
   }
 
   hr {

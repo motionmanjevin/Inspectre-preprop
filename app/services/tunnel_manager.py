@@ -14,18 +14,20 @@ logger = logging.getLogger(__name__)
 class TunnelManager:
     """Manages Cloudflare Tunnel process and URL extraction."""
     
-    def __init__(self, local_url: str = "http://localhost:8000"):
+    def __init__(self, local_url: str = "http://localhost:8000", on_url_change=None):
         """
         Initialize tunnel manager.
         
         Args:
             local_url: Local URL to tunnel (default: http://localhost:8000)
+            on_url_change: Optional callback(old_url, new_url) called when the tunnel URL changes
         """
         self.local_url = local_url
         self.tunnel_process: Optional[subprocess.Popen] = None
         self.tunnel_url: Optional[str] = None
         self._stderr_buffer: deque[str] = deque(maxlen=50)
         self._lock = threading.Lock()
+        self._on_url_change = on_url_change
     
     def start_tunnel(self) -> str:
         """
@@ -127,9 +129,15 @@ class TunnelManager:
                     match = re.search(pattern, line)
                     if match:
                         url = match.group(0)
-                        if not self.tunnel_url:
+                        if url != self.tunnel_url:
+                            old_url = self.tunnel_url
                             self.tunnel_url = url
                             logger.info(f"Extracted tunnel URL: {url}")
+                            if self._on_url_change:
+                                try:
+                                    self._on_url_change(old_url, url)
+                                except Exception as cb_err:
+                                    logger.warning("on_url_change callback error: %s", cb_err)
                         break
                         
         except Exception as e:

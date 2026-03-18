@@ -25,7 +25,11 @@ class StartRecordingRequest(BaseModel):
     )
     raw_mode: Optional[bool] = Field(
         False,
-        description="If True, record raw footage only: 1-minute segments uploaded to R2, then concatenated into 1-hour files in footage folder. No ChromaDB or Qwen processing."
+        description="If True, record raw footage only: 1-minute segments concatenated into 1-hour (or partial) files in footage folder. No ChromaDB or Qwen processing."
+    )
+    raw_auto_upload: Optional[bool] = Field(
+        True,
+        description="When raw_mode is True: if True (reliable internet), upload each saved footage (full or partial) to R2 after saving. If False, save locally only; upload on demand when the chunk is selected for a query."
     )
 
 

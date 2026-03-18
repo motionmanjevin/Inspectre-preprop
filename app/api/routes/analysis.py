@@ -8,6 +8,7 @@ from app.api.models.responses import AnalysisResponse, AnalysisResult
 from app.api.dependencies import get_current_user
 from app.services.chroma_store import ChromaStore
 from app.services.qwen_client import QwenVLClient
+from app.services.billing_client import get_billing_client
 from app.core.config import get_settings
 from app.utils.exceptions import ChromaDBError, QwenAPIError
 
@@ -55,6 +56,16 @@ async def analyze_videos(
         HTTPException: If analysis fails
     """
     try:
+        # Billing: debit one query unless premium covers it
+        billing = get_billing_client()
+        debit = billing.debit_query(email=current_user["email"], reason="standard_query", amount=1)
+        if not debit.get("ok"):
+            reason = debit.get("reason", "insufficient_credits")
+            if reason == "insufficient_credits":
+                raise HTTPException(status_code=402, detail="Not enough query credits. Please purchase a pack or upgrade to premium.")
+            else:
+                raise HTTPException(status_code=503, detail="Billing service unavailable, please try again.")
+
         chroma_store = get_chroma_store()
         settings = get_settings()
         
