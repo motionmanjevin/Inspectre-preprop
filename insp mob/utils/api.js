@@ -187,10 +187,10 @@ export const authApi = {
   /**
    * Register a new user
    */
-  async register(email, password) {
+  async register(email, password, deferSetup = false) {
     const response = await unauthenticatedRequest('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, defer_setup: deferSetup }),
     });
     setAuthToken(response.access_token);
     return response;
@@ -305,11 +305,15 @@ export const rawFootageApi = {
   /**
    * Start an incremental raw footage analysis job that processes chunks sequentially.
    */
-  async startJob(query, chunkIds) {
+  async startJob(query, chunkIds, cameraScope = null) {
     return apiRequest('/raw/jobs', {
       method: 'POST',
-      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+      body: JSON.stringify({ query, chunk_ids: chunkIds, camera_scope: cameraScope }),
     });
+  },
+
+  async getCameraScopeOptions() {
+    return apiRequest('/raw/camera-scope');
   },
 
   /**
@@ -426,6 +430,22 @@ export const systemApi = {
 };
 
 /**
+ * Device config API
+ */
+export const deviceConfigApi = {
+  async get() {
+    return apiRequest('/device-config');
+  },
+
+  async update(payload) {
+    return apiRequest('/device-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+};
+
+/**
  * Billing API
  */
 export const billingApi = {
@@ -439,4 +459,17 @@ export const billingApi = {
       body: JSON.stringify({ product_id: productId }),
     });
   },
+};
+
+export default {
+  authApi,
+  searchApi,
+  analysisApi,
+  searchApiExtended,
+  rawFootageApi,
+  alertsApi,
+  autopilotApi,
+  systemApi,
+  billingApi,
+  deviceConfigApi,
 };

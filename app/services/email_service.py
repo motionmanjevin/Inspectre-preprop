@@ -4,6 +4,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional, Dict, Any
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,21 @@ class EmailService:
             password=cfg.get("smtp_password", ""),
             from_address=cfg.get("smtp_from_address", ""),
             use_tls=bool(cfg.get("smtp_use_tls", 1)),
+        )
+
+    @classmethod
+    def from_settings(cls) -> Optional["EmailService"]:
+        """Create EmailService from .env-backed application settings."""
+        s = get_settings()
+        if not (s.SMTP_HOST and s.SMTP_USERNAME and s.SMTP_PASSWORD):
+            return None
+        return cls(
+            host=s.SMTP_HOST,
+            port=int(s.SMTP_PORT),
+            username=s.SMTP_USERNAME,
+            password=s.SMTP_PASSWORD,
+            from_address=s.SMTP_FROM_ADDRESS or s.SMTP_USERNAME,
+            use_tls=bool(s.SMTP_USE_TLS),
         )
 
     def send_tunnel_link(self, to_email: str, tunnel_url: str) -> bool:

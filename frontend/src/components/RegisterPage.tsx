@@ -7,8 +7,11 @@ interface RegisterPageProps {
   onSwitchToLogin: () => void;
 }
 
+type CameraMode = "single" | "multi";
+type CameraSlot = { slot: number; name: string; rtsp_url: string; enabled: boolean };
+
 export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps) {
-  const [step, setStep] = useState<"account" | "setup">("account");
+  const [step, setStep] = useState<"account" | "choice" | "setup">("account");
 
   // Account fields
   const [email, setEmail] = useState("");
@@ -21,6 +24,13 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
   // Device config fields
   const [rtspUrl, setRtspUrl] = useState("");
   const [cameraName, setCameraName] = useState("");
+  const [cameraMode, setCameraMode] = useState<CameraMode>("single");
+  const [multiCameras, setMultiCameras] = useState<CameraSlot[]>([
+    { slot: 1, name: "Cam 1", rtsp_url: "", enabled: false },
+    { slot: 2, name: "Cam 2", rtsp_url: "", enabled: false },
+    { slot: 3, name: "Cam 3", rtsp_url: "", enabled: false },
+    { slot: 4, name: "Cam 4", rtsp_url: "", enabled: false },
+  ]);
   const [videoPreprompt, setVideoPreprompt] = useState("");
   const [r2AccountId, setR2AccountId] = useState("");
   const [r2AccessKeyId, setR2AccessKeyId] = useState("");
@@ -60,8 +70,8 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
 
     setLoading(true);
     try {
-      await authApi.register(trimmedEmail, password);
-      setStep("setup");
+      await authApi.register(trimmedEmail, password, false);
+      setStep("choice");
     } catch (err) {
       if (err instanceof ApiError) setError(err.detail || err.message || "Registration failed");
       else setError("Registration failed. Please try again.");
@@ -74,9 +84,18 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
     setLoading(true);
     setError(null);
     try {
+      const normalizedMulti = multiCameras.map((c, i) => ({
+        slot: i + 1,
+        name: (c.name || `Cam ${i + 1}`).trim() || `Cam ${i + 1}`,
+        rtsp_url: (c.rtsp_url || "").trim(),
+        enabled: Boolean((c.rtsp_url || "").trim()) && Boolean(c.enabled),
+      }));
+      const primaryMulti = normalizedMulti.find((c) => c.enabled && c.rtsp_url);
       await deviceConfigApi.update({
-        rtsp_url: rtspUrl,
-        camera_name: cameraName,
+        rtsp_url: cameraMode === "single" ? rtspUrl : (primaryMulti?.rtsp_url || ""),
+        camera_name: cameraMode === "single" ? cameraName : (primaryMulti?.name || "Multi Camera Grid"),
+        camera_mode: cameraMode,
+        multi_cameras_json: normalizedMulti,
         video_preprompt: videoPreprompt,
         r2_account_id: r2AccountId,
         r2_access_key_id: r2AccessKeyId,
@@ -97,6 +116,39 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
     } catch (err) {
       if (err instanceof ApiError) setError(err.detail || err.message || "Failed to save config");
       else setError("Failed to save device configuration.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleContinueOnDevice = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await deviceConfigApi.update({
+        setup_deferred: false,
+      });
+      setStep("setup");
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.detail || err.message || "Failed to continue setup");
+      else setError("Failed to continue setup.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleContinueLater = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await deviceConfigApi.update({
+        setup_deferred: true,
+        setup_completed: false,
+      });
+      onRegister();
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.detail || err.message || "Failed to defer setup");
+      else setError("Failed to defer setup.");
     } finally {
       setLoading(false);
     }
@@ -187,6 +239,48 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
     );
   }
 
+  if (step === "choice") {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0a] text-white overflow-y-auto flex items-center justify-center p-4" style={{ width: "100vw", height: "100vh" }}>
+        <div className="w-full max-w-md">
+          <div className="bg-[#0f0f0f] border border-[#1a1a1a] rounded-2xl p-6 md:p-8 shadow-[0_0_40px_rgba(255,255,255,0.06)]">
+            <div className="mb-5">
+              <h2 className="text-2xl font-medium text-white">Account created</h2>
+              <p className="text-sm text-gray-500 mt-2">
+                Continue configuration on this device now, or finish later from the mobile app.
+              </p>
+            </div>
+
+            {error && (
+              <div className="mb-5 p-3 rounded-xl border border-red-500/20 bg-red-500/10">
+                <p className="text-sm text-red-400">{error}</p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleContinueOnDevice}
+                disabled={loading}
+                className="w-full bg-white hover:bg-gray-200 text-[#0a0a0a] rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Please wait..." : "Continue on device"}
+              </button>
+              <button
+                type="button"
+                onClick={handleContinueLater}
+                disabled={loading}
+                className="w-full bg-[#1a1a1a] hover:bg-[#222] text-white rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Continue later
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Device config setup wizard
   return (
     <div className="fixed inset-0 bg-[#0a0a0a] text-white overflow-y-auto flex items-center justify-center p-4" style={{ width: "100vw", height: "100vh" }}>
@@ -214,6 +308,27 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
             {configSection === "camera" && (
               <>
                 <div>
+                  <label className={labelClass}>Camera Mode</label>
+                  <div className="inline-flex bg-[#151515] rounded-xl p-1 border border-[#222]">
+                    <button
+                      type="button"
+                      onClick={() => setCameraMode("single")}
+                      className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${cameraMode === "single" ? "bg-white text-black" : "text-gray-400 hover:text-white"}`}
+                    >
+                      Single Camera
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCameraMode("multi")}
+                      className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${cameraMode === "multi" ? "bg-white text-black" : "text-gray-400 hover:text-white"}`}
+                    >
+                      Multiple Cameras
+                    </button>
+                  </div>
+                </div>
+                {cameraMode === "single" ? (
+                  <>
+                <div>
                   <label className={labelClass}>RTSP Stream URL *</label>
                   <input value={rtspUrl} onChange={(e) => setRtspUrl(e.target.value)} className={inputClass} placeholder="rtsp://192.168.1.100:554/stream" />
                 </div>
@@ -221,6 +336,38 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
                   <label className={labelClass}>Camera Name</label>
                   <input value={cameraName} onChange={(e) => setCameraName(e.target.value)} className={inputClass} placeholder="Front door camera" />
                 </div>
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    {multiCameras.map((cam, idx) => (
+                      <div key={cam.slot} className="border border-[#222] rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-gray-400">Grid Slot {cam.slot}</p>
+                          <button
+                            type="button"
+                            onClick={() => setMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, enabled: !c.enabled } : c))}
+                            className={`px-2 py-1 rounded-md text-xs ${cam.enabled ? "bg-[#14532d] text-green-200" : "bg-[#1f2937] text-gray-300"}`}
+                          >
+                            {cam.enabled ? "Enabled" : "Disabled"}
+                          </button>
+                        </div>
+                        <input
+                          value={cam.name}
+                          onChange={(e) => setMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, name: e.target.value } : c))}
+                          className={inputClass}
+                          placeholder={`Cam ${cam.slot}`}
+                        />
+                        <input
+                          value={cam.rtsp_url}
+                          onChange={(e) => setMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, rtsp_url: e.target.value, enabled: Boolean(e.target.value.trim()) || c.enabled } : c))}
+                          className={inputClass}
+                          placeholder="rtsp://camera-ip:554/stream"
+                        />
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-500">Leave empty slots blank. They render as No Signal in the grid.</p>
+                  </div>
+                )}
                 <div>
                   <label className={labelClass}>Video Analysis Prompt</label>
                   <textarea value={videoPreprompt} onChange={(e) => setVideoPreprompt(e.target.value)} className={inputClass + " min-h-[80px] resize-y"} placeholder="Describe what the AI should focus on when analyzing footage..." />
@@ -317,7 +464,7 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
             <button type="button" onClick={() => setStep("account")} className="flex-1 bg-[#1a1a1a] hover:bg-[#222] text-white rounded-xl py-3 font-medium transition-colors flex items-center justify-center gap-2">
               <ChevronLeft size={16} /> Back
             </button>
-            <button type="button" onClick={handleSaveConfig} disabled={loading || !rtspUrl.trim()} className="flex-1 bg-white hover:bg-gray-200 text-[#0a0a0a] rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <button type="button" onClick={handleSaveConfig} disabled={loading || (cameraMode === "single" ? !rtspUrl.trim() : !multiCameras.some((c) => c.enabled && c.rtsp_url.trim()))} className="flex-1 bg-white hover:bg-gray-200 text-[#0a0a0a] rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? "Saving..." : "Finish setup"}
             </button>
           </div>

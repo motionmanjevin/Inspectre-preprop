@@ -93,15 +93,20 @@ def _start_tunnel_and_notify(cfg: dict):
         if url:
             system_state.tunnel_url = url
             last_url = cfg.get("last_tunnel_url", "")
+            setup_deferred = bool(cfg.get("setup_deferred", 0))
+
+            should_email = setup_deferred or (url != last_url)
             if url != last_url:
                 logger.info("Tunnel URL changed: %s -> %s", last_url or "(none)", url)
                 set_last_tunnel_url(url)
-                email_svc = EmailService.from_device_config(cfg)
+
+            if should_email:
+                email_svc = EmailService.from_settings()
                 user_email = get_primary_user_email()
                 if email_svc and user_email:
                     email_svc.send_tunnel_link(user_email, url)
                 else:
-                    logger.info("SMTP not configured or no user email; skipping tunnel notification")
+                    logger.info("SMTP (.env) not configured or no user email; skipping tunnel notification")
     except Exception as e:
         logger.warning("Tunnel startup failed: %s", e)
 
@@ -167,9 +172,17 @@ def _auto_start_raw_recording(rtsp_url_override: str | None = None, skip_probe: 
     cfg = get_device_config()
     if not cfg:
         return
+    camera_mode = str(cfg.get("camera_mode") or "single").strip().lower()
+    active_multi = []
+    if camera_mode == "multi":
+        from app.services.device_config_service import get_active_multi_cameras
+        active_multi = get_active_multi_cameras(cfg)
     rtsp_url = rtsp_url_override or cfg.get("rtsp_url", "")
-    if not rtsp_url:
+    if camera_mode != "multi" and not rtsp_url:
         logger.warning("No RTSP URL in device config; cannot auto-start raw recording")
+        return
+    if camera_mode == "multi" and not active_multi:
+        logger.warning("Multi-camera mode enabled but no active RTSP links; cannot auto-start raw recording")
         return
 
     from app.api.routes.recording import get_video_recorder
@@ -178,14 +191,17 @@ def _auto_start_raw_recording(rtsp_url_override: str | None = None, skip_probe: 
         logger.info("Recording already in progress; skipping auto-start")
         return
 
-    if not skip_probe and not _try_rtsp_connection(rtsp_url):
+    probe_url = rtsp_url
+    if camera_mode == "multi" and active_multi:
+        probe_url = str(active_multi[0].get("rtsp_url") or "")
+    if not skip_probe and probe_url and not _try_rtsp_connection(probe_url):
         with _stream_waiter_lock:
             if _stream_waiter_running:
                 return
             _stream_waiter_running = True
         t = threading.Thread(
             target=_stream_waiter_loop,
-            args=(rtsp_url,),
+            args=(probe_url,),
             daemon=True,
             name="RtspStreamWaiter",
         )
@@ -199,20 +215,40 @@ def _auto_start_raw_recording(rtsp_url_override: str | None = None, skip_probe: 
         logger.debug("Probe finished; starting recorder after 5s delay")
 
     from app.services.video_recorder import VideoRecorder
+    from app.services.multi_camera_grid_recorder import MultiCameraGridRecorder
+    from app.services.device_config_service import get_active_multi_cameras
     from app.main import raw_chunk_callback, set_raw_auto_upload
     from app.core.config import get_settings
     import app.api.routes.recording as rec_mod
 
     settings = get_settings()
     set_raw_auto_upload(True)
-
-    rec_mod._video_recorder = VideoRecorder(
-        rtsp_url=rtsp_url,
-        output_dir=settings.RAW_FOOTAGE_DIR,
-        chunk_duration=60,
-        motion_detection_enabled=False,
-        motion_threshold=0.3,
-    )
+    camera_mode = str((cfg or {}).get("camera_mode") or "single").strip().lower()
+    if camera_mode == "multi":
+        active_cameras = get_active_multi_cameras(cfg)
+        if active_cameras:
+            rec_mod._video_recorder = MultiCameraGridRecorder(
+                cameras=(cfg or {}).get("multi_cameras_json", []),
+                output_dir=settings.RAW_FOOTAGE_DIR,
+                chunk_duration=60,
+            )
+        else:
+            logger.warning("Multi-camera mode enabled but no active cameras found; falling back to single camera.")
+            rec_mod._video_recorder = VideoRecorder(
+                rtsp_url=rtsp_url,
+                output_dir=settings.RAW_FOOTAGE_DIR,
+                chunk_duration=60,
+                motion_detection_enabled=False,
+                motion_threshold=0.3,
+            )
+    else:
+        rec_mod._video_recorder = VideoRecorder(
+            rtsp_url=rtsp_url,
+            output_dir=settings.RAW_FOOTAGE_DIR,
+            chunk_duration=60,
+            motion_detection_enabled=False,
+            motion_threshold=0.3,
+        )
     rec_mod._video_recorder.start_recording(callback=raw_chunk_callback)
     rec_mod._raw_recording_active = True
     set_recording_active(True)

@@ -8,6 +8,7 @@ from app.api.models.requests import RegisterRequest, LoginRequest
 from app.api.models.responses import TokenResponse, UserResponse
 from app.services.auth_service import AuthService
 from app.services.user_service import UserService
+from app.services.device_config_service import upsert_device_config
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,17 @@ async def register(
         )
         
         logger.info(f"User registered: {user['email']}")
+
+        # Persist deferred setup intent so startup/mobile flow can enforce completion later.
+        if bool(request.defer_setup):
+            try:
+                upsert_device_config({
+                    "setup_deferred": 1,
+                    "setup_completed": 0,
+                    "setup_completed_at": "",
+                })
+            except Exception as e:
+                logger.warning("Could not persist deferred setup intent: %s", e)
         
         return TokenResponse(
             access_token=token,

@@ -89,6 +89,12 @@ const MenuDrawer = ({ visible, onClose, onNavigate, currentPage }) => {
       icon: 'card-outline',
       page: 'payments',
     },
+    {
+      id: 'settings',
+      label: 'Settings',
+      icon: 'settings-outline',
+      page: 'settings',
+    },
   ];
 
   return (

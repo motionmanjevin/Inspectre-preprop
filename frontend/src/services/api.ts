@@ -440,10 +440,10 @@ export const authApi = {
   /**
    * Register a new user
    */
-  async register(email: string, password: string): Promise<TokenResponse> {
+  async register(email: string, password: string, deferSetup: boolean = false): Promise<TokenResponse> {
     const response = await apiRequest<TokenResponse>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, defer_setup: deferSetup }),
     });
     setAuthToken(response.access_token);
     return response;
@@ -497,6 +497,21 @@ export interface DeviceConfig {
   reliable_internet: boolean;
   local_storage_max_gb: number;
   r2_max_gb: number;
+  camera_mode: 'single' | 'multi';
+  multi_cameras_json: Array<{
+    slot: number;
+    name: string;
+    rtsp_url: string;
+    enabled: boolean;
+  }>;
+  setup_deferred: boolean;
+  setup_completed: boolean;
+  setup_completed_at: string;
+  setup_status: {
+    is_complete: boolean;
+    setup_deferred: boolean;
+    missing_fields: string[];
+  };
 }
 
 export const deviceConfigApi = {

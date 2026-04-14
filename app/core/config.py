@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     R2_SECRET_ACCESS_KEY: str = ""
     R2_BUCKET_NAME: str = ""
     R2_PUBLIC_URL_BASE: str = ""
+
+    # Default SMTP Settings (used for tunnel-link emails)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_ADDRESS: str = ""
+    SMTP_USE_TLS: bool = True
     
     # Video Processing Settings
     VIDEO_PREPROMPT: str = (

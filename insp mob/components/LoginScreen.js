@@ -18,7 +18,7 @@ import { authApi } from '../utils/api';
 
 const { width, height } = Dimensions.get('window');
 
-const LoginScreen = ({ onLogin }) => {
+const LoginScreen = ({ onLogin, onRescan }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -47,8 +47,12 @@ const LoginScreen = ({ onLogin }) => {
       await authApi.login(email.trim(), password);
       onLogin();
     } catch (err) {
-      const errorMessage = err.message || 'Login failed. Please check your credentials.';
-      setError(errorMessage);
+      const msg = err.message || '';
+      if (msg.includes('404') || msg.includes('Network request failed')) {
+        setError('Cannot reach the Inspectre server. The connection may be stale — try scanning a new QR code.');
+      } else {
+        setError(msg || 'Login failed. Please check your credentials.');
+      }
       console.error('Login error:', err);
     } finally {
       setLoading(false);
@@ -198,6 +202,13 @@ const LoginScreen = ({ onLogin }) => {
             <TouchableOpacity style={styles.forgotPassword}>
               <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
             </TouchableOpacity>
+
+            {onRescan && (
+              <TouchableOpacity style={styles.rescanButton} onPress={onRescan}>
+                <Ionicons name="qr-code-outline" size={18} color="#6b7280" />
+                <Text style={styles.rescanText}>Scan new server QR</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </Animated.View>
       </KeyboardAvoidingView>
@@ -316,6 +327,24 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     fontWeight: '400',
+  },
+  rescanButton: {
+    marginTop: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(107, 114, 128, 0.3)',
+    alignSelf: 'center',
+  },
+  rescanText: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '500',
   },
   errorContainer: {
     marginBottom: 16,

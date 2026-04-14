@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking, Platform, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { billingApi } from '../utils/api';
 
@@ -10,7 +10,7 @@ const PRODUCTS = [
   { id: 'PREMIUM_MONTHLY', label: 'Premium (1 month)', price: '200 GHC', subtitle: 'Unlimited queries + 10 autopilots' },
 ];
 
-export default function PaymentsPage() {
+export default function PaymentsPage({ onBack }) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -56,8 +56,14 @@ export default function PaymentsPage() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={22} color="#f9fafb" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Payments & Subscription</Text>
+        <View style={styles.backButton} />
+      </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Payments & Subscription</Text>
         <Text style={styles.subtitle}>Manage your query credits and premium plan.</Text>
 
         {loading && (
@@ -170,16 +176,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#020617',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(55, 65, 81, 0.6)',
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#f9fafb',
   },
   content: {
     paddingHorizontal: 20,
     paddingVertical: 24,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#f9fafb',
-    marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,

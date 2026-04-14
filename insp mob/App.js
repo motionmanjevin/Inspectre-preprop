@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -14,6 +14,7 @@ import {
   Dimensions,
   Alert,
   Image,
+  BackHandler,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -37,6 +38,7 @@ import {
   rawFootageApi,
   systemApi,
   billingApi,
+  deviceConfigApi,
 } from './utils/api';
 import MenuDrawer from './components/MenuDrawer';
 import AutopilotPage from './components/AutopilotPage';
@@ -44,6 +46,7 @@ import ChatHistoryPage from './components/ChatHistoryPage';
 import ProcessingTimelinePage from './components/ProcessingTimelinePage';
 import RawFootagePage from './components/RawFootagePage';
 import PaymentsPage from './components/PaymentsPage';
+import MobileSettingsPage from './components/MobileSettingsPage';
 import DateFilterModal from './components/DateFilterModal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -397,7 +400,7 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [showVideoOverlay, setShowVideoOverlay] = useState(false);
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
-  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'autopilot', 'history', 'timeline', 'rawFootage', 'payments'
+  const [currentPage, setCurrentPage] = useState('chat'); // 'chat', 'autopilot', 'history', 'timeline', 'rawFootage', 'payments', 'settings'
   const [timeFilter, setTimeFilter] = useState('Last 24 hours');
   const [selectedDate, setSelectedDate] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
@@ -406,9 +409,14 @@ export default function App() {
   const [rawChunks, setRawChunks] = useState([]);
   const [selectedRawChunkIds, setSelectedRawChunkIds] = useState([]);
   const [lockedRawChunkIds, setLockedRawChunkIds] = useState(null);
+  const [cameraScopeOptions, setCameraScopeOptions] = useState([{ id: 'all', label: 'All Cameras' }]);
+  const [selectedCameraScope, setSelectedCameraScope] = useState('all');
+  const [showCameraScopePicker, setShowCameraScopePicker] = useState(false);
   const [rawJobProgress, setRawJobProgress] = useState(null); // { total, completed } when job running
   const [rtspErrorStatus, setRtspErrorStatus] = useState(null); // { rtsp_error, rtsp_error_message } when RTSP failed after 10 retries
   const [billingState, setBillingState] = useState(null);
+  const [_setupStatus, setSetupStatus] = useState(null);
+  const [setupPromptShown, setSetupPromptShown] = useState(false);
 
   // Poll system status for RTSP error when logged in
   useEffect(() => {
@@ -455,6 +463,40 @@ export default function App() {
     load();
   }, [isLoggedIn]);
 
+  const checkSetupStatus = useCallback(async () => {
+    if (!isLoggedIn) {
+      setSetupStatus(null);
+      setSetupPromptShown(false);
+      return;
+    }
+    try {
+      const cfg = await deviceConfigApi.get();
+      const status = cfg?.setup_status || {
+        is_complete: !!cfg?.setup_completed,
+        setup_deferred: !!cfg?.setup_deferred,
+        missing_fields: [],
+      };
+      setSetupStatus(status);
+      if (!status.is_complete && !setupPromptShown) {
+        setSetupPromptShown(true);
+        Alert.alert(
+          'Setup required',
+          'Your device setup is incomplete. Please finish setup in Settings to continue smoothly.',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => setCurrentPage('settings') },
+          ]
+        );
+      }
+    } catch {
+      setSetupStatus(null);
+    }
+  }, [isLoggedIn, setupPromptShown]);
+
+  useEffect(() => {
+    checkSetupStatus();
+  }, [checkSetupStatus]);
+
   // Initialize tunnel URL and check auth after splash finishes
   const handleSplashFinish = async () => {
     setShowSplash(false);
@@ -470,15 +512,26 @@ export default function App() {
       return;
     }
     
-    // Test connection to saved tunnel URL
+    // Test connection to saved tunnel URL — validate JSON body to catch stale tunnels
     try {
       const testUrl = `${tunnelUrl}/health`;
-      const response = await fetch(testUrl, {
-        method: 'GET',
-      });
+      const response = await fetch(testUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
       
       if (response.ok) {
-        // Connection successful, validate token if present
+        let valid = false;
+        try {
+          const body = await response.json();
+          valid = body && (body.status === 'healthy' || body.status === 'ok');
+        } catch {
+          valid = false;
+        }
+
+        if (!valid) {
+          console.log('Health check returned non-Inspectre response, rescanning');
+          setShowQRScanner(true);
+          return;
+        }
+
         const token = await getAuthToken();
         if (token) {
           try {
@@ -490,19 +543,17 @@ export default function App() {
             setIsLoggedIn(false);
           }
         }
-        // If no token or invalid token, login screen will be shown
       } else {
-        // Connection failed, ask to rescan
         setShowQRScanner(true);
       }
     } catch (error) {
-      // Connection failed, ask to rescan
       console.log('Tunnel connection test failed:', error);
       setShowQRScanner(true);
     }
   };
 
   const handleLogin = async () => {
+    setSetupPromptShown(false);
     setIsLoggedIn(true);
   };
 
@@ -622,6 +673,20 @@ export default function App() {
     }
   };
 
+  const fetchCameraScopeOptions = async () => {
+    try {
+      const resp = await rawFootageApi.getCameraScopeOptions();
+      const opts = resp?.options?.length ? resp.options : [{ id: 'all', label: 'All Cameras' }];
+      setCameraScopeOptions(opts);
+      if (!opts.some((o) => o.id === selectedCameraScope)) {
+        setSelectedCameraScope('all');
+      }
+    } catch {
+      setCameraScopeOptions([{ id: 'all', label: 'All Cameras' }]);
+      setSelectedCameraScope('all');
+    }
+  };
+
   // Get target date string for filtering raw footage
   const getTargetDate = () => {
     if (timeFilter === 'Last 24 hours' || !selectedDate) {
@@ -717,7 +782,13 @@ export default function App() {
       }
 
       // Use job-based API so results stream in one at a time (like Raw Footage page)
-      const start = await rawFootageApi.startJob(queryText, chunkIdsToUse);
+      const selectedScope = selectedCameraScope === 'all'
+        ? null
+        : (() => {
+            const m = String(selectedCameraScope).match(/^slot-(\d)$/);
+            return m ? [Number(m[1])] : null;
+          })();
+      const start = await rawFootageApi.startJob(queryText, chunkIdsToUse, selectedScope);
       setRawJobProgress({ total: start.total_chunks, completed: 0 });
       let lastResultsCount = 0;
       let done = false;
@@ -791,6 +862,18 @@ export default function App() {
         return;
       }
 
+      if (error.message?.includes('Not enough query credits')) {
+        Alert.alert(
+          'Out of Credits',
+          'You have no query credits left. Purchase a pack or upgrade to premium.',
+          [
+            { text: 'Go to Payments', onPress: () => setCurrentPage('payments') },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+
       setMessages(prev => [
         ...prev,
         {
@@ -803,6 +886,7 @@ export default function App() {
       setIsLoading(false);
       setRawJobProgress(null);
       saveChatHistory();
+      billingApi.getState().then(s => setBillingState(s)).catch(() => {});
     }
   };
 
@@ -827,8 +911,24 @@ export default function App() {
   useEffect(() => {
     if (isLoggedIn && currentPage === 'chat') {
       fetchAvailableDates();
+      fetchCameraScopeOptions();
     }
   }, [isLoggedIn, currentPage]);
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (currentPage !== 'chat') {
+        setCurrentPage('chat');
+        return true;
+      }
+      if (showMenuDrawer) {
+        setShowMenuDrawer(false);
+        return true;
+      }
+      return false;
+    });
+    return () => handler.remove();
+  }, [currentPage, showMenuDrawer]);
 
   const renderMessage = (msg, index) => {
     switch (msg.type) {
@@ -890,7 +990,7 @@ export default function App() {
 
   // If not logged in, show login screen
   if (!isLoggedIn) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLogin} onRescan={() => setShowQRScanner(true)} />;
   }
 
   const isFirstTime = messages.length === 0;
@@ -923,6 +1023,27 @@ export default function App() {
         <PaymentsPage
           onBack={() => {
             setCurrentPage('chat');
+          }}
+        />
+        {isLoggedIn && (
+          <MenuDrawer
+            visible={showMenuDrawer}
+            onClose={() => setShowMenuDrawer(false)}
+            onNavigate={handleNavigate}
+            currentPage={currentPage}
+          />
+        )}
+      </>
+    );
+  }
+
+  if (currentPage === 'settings') {
+    return (
+      <>
+        <MobileSettingsPage
+          onBack={() => {
+            setCurrentPage('chat');
+            checkSetupStatus();
           }}
         />
         {isLoggedIn && (
@@ -1092,10 +1213,18 @@ export default function App() {
               <Ionicons name="warning" size={22} color="#dc2626" />
             </TouchableOpacity>
           )}
+          {currentPage === 'chat' && billingState && (
+            <TouchableOpacity
+              onPress={() => setCurrentPage('payments')}
+              style={styles.creditsBadge}
+            >
+              <Ionicons name="flash" size={14} color="#facc15" />
+              <Text style={styles.creditsText}>{billingState.query_credits}</Text>
+            </TouchableOpacity>
+          )}
           {currentPage === 'chat' && (
             <TouchableOpacity
               onPress={async () => {
-                // Always refresh dates when opening the modal
                 await fetchAvailableDates();
                 setShowDateFilter(true);
               }}
@@ -1205,6 +1334,19 @@ export default function App() {
 
             {/* Input bar */}
             <View style={styles.inputContainer}>
+              <View style={styles.scopeRow}>
+                <TouchableOpacity
+                  style={styles.scopePill}
+                  onPress={() => setShowCameraScopePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="grid-outline" size={14} color="#475569" />
+                  <Text style={styles.scopePillText}>
+                    {cameraScopeOptions.find((o) => o.id === selectedCameraScope)?.label || 'All Cameras'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color="#64748b" />
+                </TouchableOpacity>
+              </View>
               <View style={styles.inputWrapper}>
                 <LinearGradient
                   colors={['rgba(129, 140, 248, 0.18)', 'rgba(129, 140, 248, 0.06)', 'rgba(37, 99, 235, 0.04)']}
@@ -1240,6 +1382,35 @@ export default function App() {
                 </View>
               </View>
             </View>
+            <Modal
+              visible={showCameraScopePicker}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowCameraScopePicker(false)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => setShowCameraScopePicker(false)}
+                style={styles.scopeModalBackdrop}
+              >
+                <View style={styles.scopeModalCard}>
+                  {cameraScopeOptions.map((opt) => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={styles.scopeOption}
+                      onPress={() => {
+                        setSelectedCameraScope(opt.id);
+                        setShowCameraScopePicker(false);
+                      }}
+                    >
+                      <Text style={[styles.scopeOptionText, selectedCameraScope === opt.id && styles.scopeOptionTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            </Modal>
           </>
         )}
       </KeyboardAvoidingView>
@@ -1347,6 +1518,21 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 2,
     fontWeight: '500',
+  },
+  creditsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(250, 204, 21, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    gap: 3,
+    marginRight: 2,
+  },
+  creditsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#facc15',
   },
   filterButton: {
     width: 40,
@@ -1545,6 +1731,53 @@ const styles = StyleSheet.create({
   inputContainer: {
     paddingHorizontal: 32,
     paddingVertical: 20,
+  },
+  scopeRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  scopePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.4)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  scopePillText: {
+    color: '#334155',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  scopeModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.2)',
+    justifyContent: 'flex-end',
+    padding: 20,
+  },
+  scopeModalCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    overflow: 'hidden',
+  },
+  scopeOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(226, 232, 240, 0.8)',
+  },
+  scopeOptionText: {
+    color: '#334155',
+    fontSize: 14,
+  },
+  scopeOptionTextActive: {
+    color: '#0f172a',
+    fontWeight: '600',
   },
   inputWrapper: {
     flexDirection: 'row',

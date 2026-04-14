@@ -10,7 +10,9 @@ from app.api.models.requests import StartRecordingRequest
 from app.api.models.responses import RecordingResponse, StatusResponse
 from app.api.dependencies import get_current_user
 from app.services.video_recorder import VideoRecorder
+from app.services.multi_camera_grid_recorder import MultiCameraGridRecorder
 from app.services.chroma_store import ChromaStore
+from app.services.device_config_service import get_device_config, get_active_multi_cameras
 from app.core.config import get_settings
 from app.utils.exceptions import VideoRecordingError, ChromaDBError
 
@@ -19,11 +21,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/recording", tags=["recording"])
 
 # Global recorder instance (in production, use dependency injection)
-_video_recorder: Optional[VideoRecorder] = None
+_video_recorder: Optional[object] = None
 _raw_recording_active: bool = False
 
 
-def get_video_recorder() -> Optional[VideoRecorder]:
+def get_video_recorder() -> Optional[object]:
     """Get current video recorder instance."""
     return _video_recorder
 
@@ -56,6 +58,8 @@ async def start_recording(
     try:
         settings = get_settings()
         raw_mode = request.raw_mode or False
+        device_cfg = get_device_config() or {}
+        camera_mode = str(device_cfg.get("camera_mode") or "single").strip().lower()
 
         if raw_mode:
             # Raw recording: 1‑min continuous chunks, saved in footage dir.
@@ -69,8 +73,27 @@ async def start_recording(
             set_raw_auto_upload(request.raw_auto_upload if request.raw_auto_upload is not None else True)
             callback = raw_chunk_callback
             _raw_recording_active = True
+            if camera_mode == "multi":
+                active_cameras = get_active_multi_cameras(device_cfg)
+                if not active_cameras:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Multi-camera mode is enabled but no active camera RTSP links are configured.",
+                    )
+                _video_recorder = MultiCameraGridRecorder(
+                    cameras=device_cfg.get("multi_cameras_json", []),
+                    output_dir=output_dir,
+                    chunk_duration=chunk_duration_seconds,
+                )
+                _video_recorder.start_recording(callback=callback)
+                from app.services.device_config_service import set_recording_active
+                set_recording_active(True)
+                logger.info("Recording started for multi-camera grid (%d active cameras)", len(active_cameras))
+                return RecordingResponse(status="recording_started", rtsp_url="multi-camera-grid")
         else:
             output_dir = settings.RECORDINGS_DIR
+            if not (request.rtsp_url or "").strip():
+                raise HTTPException(status_code=400, detail="RTSP URL is required for single-camera recording.")
             if request.chunk_duration:
                 chunk_duration_seconds = request.chunk_duration * 60
             else:
@@ -173,8 +196,8 @@ async def get_status(
     global _video_recorder
     
     return StatusResponse(
-        recording=_video_recorder.is_recording if _video_recorder else False,
-        rtsp_url=_video_recorder.rtsp_url if _video_recorder else None
+        recording=bool(_video_recorder.is_recording) if _video_recorder else False,
+        rtsp_url=getattr(_video_recorder, "rtsp_url", None) if _video_recorder else None
     )
 
 

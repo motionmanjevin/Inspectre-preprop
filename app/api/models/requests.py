@@ -6,7 +6,7 @@ from typing import Optional
 
 class StartRecordingRequest(BaseModel):
     """Request to start video recording."""
-    rtsp_url: str = Field(..., description="RTSP stream URL to record")
+    rtsp_url: Optional[str] = Field("", description="RTSP stream URL to record (single-camera mode)")
     chunk_duration: Optional[int] = Field(
         None,
         ge=1,
@@ -69,6 +69,10 @@ class RegisterRequest(BaseModel):
     """Request to register a new user."""
     email: str = Field(..., description="User email address", min_length=3)
     password: str = Field(..., description="User password", min_length=6)
+    defer_setup: Optional[bool] = Field(
+        False,
+        description="If True, skip immediate device setup and complete it later from mobile settings."
+    )
 
 
 class LoginRequest(BaseModel):

@@ -9,6 +9,14 @@ R2_SECRET_ACCESS_KEY=your-secret-access-key
 R2_BUCKET_NAME=your-bucket-name
 R2_PUBLIC_URL_BASE=https://your-bucket.r2.dev
 
+# Default SMTP Settings (for tunnel-link emails)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM_ADDRESS=your-email@gmail.com
+SMTP_USE_TLS=true
+
 # Video Processing Settings
 VIDEO_PREPROMPT=Analyze this video in detail. Describe all activities, objects, people, and events. Provide a comprehensive analysis.
 VIDEO_CHUNK_DURATION=600

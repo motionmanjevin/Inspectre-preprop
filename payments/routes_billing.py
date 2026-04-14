@@ -76,8 +76,7 @@ def debit_query(payload: DebitQueryRequest, db: DBDep):
     user = get_or_create_user_with_balance(db, payload.email)
     bal = user.balance
 
-    # If premium is active and this is a standard query, do not decrement credits.
-    if is_premium_active(user) and payload.reason == "standard_query":
+    if is_premium_active(user):
         return DebitResponse(ok=True, billing_state=_to_billing_state(user))
 
     needed = payload.amount
@@ -85,6 +84,9 @@ def debit_query(payload: DebitQueryRequest, db: DBDep):
         return DebitResponse(ok=False, reason="insufficient_credits", billing_state=_to_billing_state(user))
 
     bal.query_credits -= needed
+    free_used = min(bal.free_queries_remaining, needed)
+    if free_used > 0:
+        bal.free_queries_remaining -= free_used
 
     tx = Transaction(
         user_id=user.id,

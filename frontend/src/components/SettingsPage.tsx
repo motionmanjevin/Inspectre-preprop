@@ -3,6 +3,8 @@ import { Save, Play, Square, Trash2, CheckCircle, AlertCircle, Loader2, Settings
 import { recordingApi, healthApi, deviceConfigApi, type DeviceConfig } from "../services/api";
 
 type SettingsTab = "recording" | "device";
+type CameraMode = "single" | "multi";
+type CameraSlot = { slot: number; name: string; rtsp_url: string; enabled: boolean };
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("recording");
@@ -25,6 +27,13 @@ export function SettingsPage() {
   // Device config state
   const [dcRtspUrl, setDcRtspUrl] = useState("");
   const [dcCameraName, setDcCameraName] = useState("");
+  const [dcCameraMode, setDcCameraMode] = useState<CameraMode>("single");
+  const [dcMultiCameras, setDcMultiCameras] = useState<CameraSlot[]>([
+    { slot: 1, name: "Cam 1", rtsp_url: "", enabled: false },
+    { slot: 2, name: "Cam 2", rtsp_url: "", enabled: false },
+    { slot: 3, name: "Cam 3", rtsp_url: "", enabled: false },
+    { slot: 4, name: "Cam 4", rtsp_url: "", enabled: false },
+  ]);
   const [dcVideoPreprompt, setDcVideoPreprompt] = useState("");
   const [dcR2AccountId, setDcR2AccountId] = useState("");
   const [dcR2AccessKeyId, setDcR2AccessKeyId] = useState("");
@@ -72,6 +81,13 @@ export function SettingsPage() {
       const cfg = await deviceConfigApi.get();
       setDcRtspUrl(cfg.rtsp_url);
       setDcCameraName(cfg.camera_name);
+      setDcCameraMode((cfg.camera_mode || "single") as CameraMode);
+      setDcMultiCameras((cfg.multi_cameras_json && cfg.multi_cameras_json.length > 0 ? cfg.multi_cameras_json : [
+        { slot: 1, name: "Cam 1", rtsp_url: "", enabled: false },
+        { slot: 2, name: "Cam 2", rtsp_url: "", enabled: false },
+        { slot: 3, name: "Cam 3", rtsp_url: "", enabled: false },
+        { slot: 4, name: "Cam 4", rtsp_url: "", enabled: false },
+      ]) as CameraSlot[]);
       setDcVideoPreprompt(cfg.video_preprompt);
       setDcR2AccountId(cfg.r2_account_id);
       setDcR2AccessKeyId(cfg.r2_access_key_id);
@@ -151,9 +167,18 @@ export function SettingsPage() {
   const handleSaveDeviceConfig = async () => {
     setDcLoading(true);
     try {
+      const normalizedMulti = dcMultiCameras.map((c, i) => ({
+        slot: i + 1,
+        name: (c.name || `Cam ${i + 1}`).trim() || `Cam ${i + 1}`,
+        rtsp_url: (c.rtsp_url || "").trim(),
+        enabled: Boolean((c.rtsp_url || "").trim()) && Boolean(c.enabled),
+      }));
+      const primaryMulti = normalizedMulti.find((c) => c.enabled && c.rtsp_url);
       await deviceConfigApi.update({
-        rtsp_url: dcRtspUrl,
-        camera_name: dcCameraName,
+        rtsp_url: dcCameraMode === "single" ? dcRtspUrl : (primaryMulti?.rtsp_url || ""),
+        camera_name: dcCameraMode === "single" ? dcCameraName : (primaryMulti?.name || "Multi Camera Grid"),
+        camera_mode: dcCameraMode,
+        multi_cameras_json: normalizedMulti,
         video_preprompt: dcVideoPreprompt,
         r2_account_id: dcR2AccountId,
         r2_access_key_id: dcR2AccessKeyId,
@@ -401,6 +426,27 @@ export function SettingsPage() {
             <div className="space-y-4">
               {dcSection === "camera" && (<>
                 <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Camera Mode</label>
+                  <div className="inline-flex bg-[#151515] rounded-xl p-1 border border-[#222]">
+                    <button
+                      type="button"
+                      onClick={() => setDcCameraMode("single")}
+                      className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${dcCameraMode === "single" ? "bg-white text-black" : "text-gray-400 hover:text-white"}`}
+                    >
+                      Single Camera
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDcCameraMode("multi")}
+                      className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${dcCameraMode === "multi" ? "bg-white text-black" : "text-gray-400 hover:text-white"}`}
+                    >
+                      Multiple Cameras
+                    </button>
+                  </div>
+                </div>
+                {dcCameraMode === "single" ? (
+                  <>
+                <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">RTSP Stream URL</label>
                   <input value={dcRtspUrl} onChange={(e) => setDcRtspUrl(e.target.value)} className={inputClass} placeholder="rtsp://192.168.1.100:554/stream" />
                 </div>
@@ -408,6 +454,38 @@ export function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-400 mb-1">Camera Name</label>
                   <input value={dcCameraName} onChange={(e) => setDcCameraName(e.target.value)} className={inputClass} placeholder="Front door camera" />
                 </div>
+                  </>
+                ) : (
+                  <div className="space-y-3">
+                    {dcMultiCameras.map((cam, idx) => (
+                      <div key={cam.slot} className="border border-[#222] rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-gray-400">Grid Slot {cam.slot}</p>
+                          <button
+                            type="button"
+                            onClick={() => setDcMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, enabled: !c.enabled } : c))}
+                            className={`px-2 py-1 rounded-md text-xs ${cam.enabled ? "bg-[#14532d] text-green-200" : "bg-[#1f2937] text-gray-300"}`}
+                          >
+                            {cam.enabled ? "Enabled" : "Disabled"}
+                          </button>
+                        </div>
+                        <input
+                          value={cam.name}
+                          onChange={(e) => setDcMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, name: e.target.value } : c))}
+                          className={inputClass}
+                          placeholder={`Cam ${cam.slot}`}
+                        />
+                        <input
+                          value={cam.rtsp_url}
+                          onChange={(e) => setDcMultiCameras((prev) => prev.map((c, i) => i === idx ? { ...c, rtsp_url: e.target.value, enabled: Boolean(e.target.value.trim()) || c.enabled } : c))}
+                          className={inputClass}
+                          placeholder="rtsp://camera-ip:554/stream"
+                        />
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-500">Leave empty slots blank. They render as No Signal in the merged grid.</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-1">Video Analysis Prompt</label>
                   <textarea value={dcVideoPreprompt} onChange={(e) => setDcVideoPreprompt(e.target.value)} className={inputClass + " min-h-[80px] resize-y"} placeholder="Describe what the AI should focus on..." />

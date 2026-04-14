@@ -16,6 +16,8 @@ from app.api.dependencies import get_current_user
 from app.api.models.responses import AnalysisResponse, AnalysisResult
 from app.core.config import get_settings
 from app.services.auth_service import AuthService
+from app.services.billing_client import get_billing_client
+from app.services.device_config_service import get_device_config, normalize_multi_cameras
 from app.services.qwen_client import QwenVLClient
 from app.utils.exceptions import QwenAPIError
 
@@ -67,6 +69,22 @@ class RawQueryRequest(BaseModel):
         min_length=1,
         description="One or more chunk filenames (e.g. footage_20260218_160000.mp4, or '__live__' for current hour)",
     )
+    camera_scope: Optional[list[int]] = Field(
+        None,
+        description="Optional grid camera slots to focus on (1-4). Omit/empty means all cameras.",
+    )
+
+
+class CameraScopeOption(BaseModel):
+    id: str
+    label: str
+    slot: Optional[int] = None
+    position: Optional[str] = None
+
+
+class CameraScopeOptionsResponse(BaseModel):
+    camera_mode: str
+    options: List[CameraScopeOption]
 
 
 class RawJobStatus(str, Enum):
@@ -82,6 +100,7 @@ class RawQueryJob(BaseModel):
     id: str
     query: str
     chunk_ids: List[str]
+    camera_scope: Optional[list[int]] = None
     status: RawJobStatus
     created_at: datetime
     updated_at: datetime
@@ -112,6 +131,42 @@ _jobs: Dict[str, RawQueryJob] = {}
 def _get_qwen_client() -> QwenVLClient:
     settings = get_settings()
     return QwenVLClient(api_key=settings.QWEN_API_KEY, base_url=settings.QWEN_BASE_URL)
+
+
+def _slot_position_name(slot: int) -> str:
+    return {
+        1: "top-left",
+        2: "top-right",
+        3: "bottom-left",
+        4: "bottom-right",
+    }.get(slot, f"slot-{slot}")
+
+
+def _camera_scope_prompt_addendum(camera_scope: Optional[list[int]]) -> str:
+    cfg = get_device_config() or {}
+    if str(cfg.get("camera_mode") or "single").lower() != "multi":
+        return ""
+    cams = normalize_multi_cameras(cfg.get("multi_cameras_json"))
+    scope = sorted({int(s) for s in (camera_scope or []) if 1 <= int(s) <= 4})
+    if not scope:
+        scope = [1, 2, 3, 4]
+    scoped_cams = [c for c in cams if int(c.get("slot", 0)) in scope]
+    if not scoped_cams:
+        return ""
+    lines = [
+        "MULTI-CAMERA GRID INSTRUCTION:",
+        "The video is a 2x2 grid. Analyze ONLY the selected camera regions below unless user explicitly asks for all.",
+    ]
+    for c in scoped_cams:
+        slot = int(c.get("slot", 0))
+        name = str(c.get("name") or f"Cam {slot}")
+        lines.append(f"- Slot {slot} ({_slot_position_name(slot)}): {name}")
+    lines += [
+        "When citing events, include both camera name and slot in each timestamp entry.",
+        "Required timestamp format example: [00:12:08] Cam 2 (top-right): person enters gate.",
+        "Do not attribute events to unselected cameras.",
+    ]
+    return "\n\n" + "\n".join(lines)
 
 
 def _r2_url_for_footage(filename: str) -> str:
@@ -170,6 +225,7 @@ def cleanup_temp_raw_queries() -> int:
 def _process_raw_chunks(
     query: str,
     chunk_ids: List[str],
+    camera_scope: Optional[list[int]],
     settings,
     qwen_client: QwenVLClient,
     per_result: Optional[Callable[[AnalysisResult], None]] = None,
@@ -204,7 +260,7 @@ def _process_raw_chunks(
         try:
             analysis_output = qwen_client.analyze_video_flash(
                 video_url=video_url,
-                user_query=query,
+                user_query=query + _camera_scope_prompt_addendum(camera_scope),
                 fps=settings.VIDEO_FPS,
             )
             result = AnalysisResult(
@@ -263,6 +319,7 @@ def _start_raw_query_job(job: RawQueryJob) -> None:
             _process_raw_chunks(
                 query=job.query,
                 chunk_ids=job.chunk_ids,
+                camera_scope=getattr(job, "camera_scope", None),
                 settings=settings,
                 qwen_client=qwen_client,
                 per_result=_on_result,
@@ -466,6 +523,35 @@ async def list_footage(
     return RawFootageListResponse(chunks=items)
 
 
+@router.get("/camera-scope", response_model=CameraScopeOptionsResponse)
+async def get_camera_scope_options(
+    current_user: dict = Depends(get_current_user),
+) -> CameraScopeOptionsResponse:
+    cfg = get_device_config() or {}
+    mode = str(cfg.get("camera_mode") or "single").lower()
+    if mode != "multi":
+        return CameraScopeOptionsResponse(
+            camera_mode="single",
+            options=[CameraScopeOption(id="all", label="All Cameras")],
+        )
+    cams = normalize_multi_cameras(cfg.get("multi_cameras_json"))
+    options: List[CameraScopeOption] = [CameraScopeOption(id="all", label="All Cameras")]
+    for c in cams:
+        if not (c.get("enabled") and str(c.get("rtsp_url") or "").strip()):
+            continue
+        slot = int(c.get("slot", 0))
+        name = str(c.get("name") or f"Cam {slot}")
+        options.append(
+            CameraScopeOption(
+                id=f"slot-{slot}",
+                label=f"{name} ({_slot_position_name(slot)})",
+                slot=slot,
+                position=_slot_position_name(slot),
+            )
+        )
+    return CameraScopeOptionsResponse(camera_mode="multi", options=options)
+
+
 @router.get("/videos/{file_path:path}")
 async def get_raw_video(
     file_path: str,
@@ -578,6 +664,7 @@ async def query_footage_chunks(
     results = _process_raw_chunks(
         query=request.query,
         chunk_ids=request.chunk_ids,
+        camera_scope=request.camera_scope,
         settings=settings,
         qwen_client=qwen_client,
         per_result=None,
@@ -591,12 +678,22 @@ async def create_raw_query_job(
     current_user: dict = Depends(get_current_user),
 ) -> RawJobCreateResponse:
     """Create a background job to process multiple raw chunks sequentially with incremental results."""
+    billing = get_billing_client()
+    debit = billing.debit_query(email=current_user["email"], reason="raw_query_job", amount=1)
+    if not debit.get("ok"):
+        reason = debit.get("reason", "insufficient_credits")
+        if reason == "insufficient_credits":
+            raise HTTPException(status_code=402, detail="Not enough query credits. Please purchase a pack or upgrade to premium.")
+        else:
+            raise HTTPException(status_code=503, detail="Billing service unavailable, please try again.")
+
     now = datetime.utcnow()
     job_id = str(uuid.uuid4())
     job = RawQueryJob(
         id=job_id,
         query=request.query,
         chunk_ids=list(request.chunk_ids),
+        camera_scope=request.camera_scope,
         status=RawJobStatus.PENDING,
         created_at=now,
         updated_at=now,
