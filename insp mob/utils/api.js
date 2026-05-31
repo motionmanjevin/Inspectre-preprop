@@ -461,6 +461,24 @@ export const billingApi = {
   },
 };
 
+export const whatsappApi = {
+  async getLinkStatus() {
+    return apiRequest('/whatsapp/link/status');
+  },
+
+  async startLink() {
+    return apiRequest('/whatsapp/link/start', {
+      method: 'POST',
+    });
+  },
+
+  async unlink() {
+    return apiRequest('/whatsapp/link/unlink', {
+      method: 'POST',
+    });
+  },
+};
+
 export default {
   authApi,
   searchApi,
@@ -472,4 +490,5 @@ export default {
   systemApi,
   billingApi,
   deviceConfigApi,
+  whatsappApi,
 };

@@ -43,7 +43,7 @@ app.add_middleware(
 )
 
 # Include routers (import recording after chunk_callback is defined)
-from app.api.routes import recording, videos, alerts, auth, tunnel, raw_footage, system, device_config, autopilot, billing
+from app.api.routes import recording, videos, alerts, auth, tunnel, raw_footage, system, device_config, autopilot, billing, whatsapp
 
 app.include_router(health.router)  # Public endpoint
 app.include_router(auth.router)  # Public endpoints (register/login)
@@ -58,6 +58,7 @@ app.include_router(autopilot.router)
 app.include_router(tunnel.router)
 app.include_router(raw_footage.router)
 app.include_router(billing.router)
+app.include_router(whatsapp.router)
 
 # Initialize services (singleton pattern)
 _qwen_client: Optional[QwenVLClient] = None
@@ -166,10 +167,15 @@ _temp_raw_entries: List[tuple[Path, str]] = []
 
 
 def _concat_segments(segment_paths: List[str], output_path: str) -> bool:
-    """Concatenate MP4 segments into one file using FFmpeg concat demuxer."""
+    """
+    Concatenate MP4 segments and re-encode to H.264 + faststart for browser playback.
+    Stream-copy concat alone often plays in VLC but not in HTML5 video elements.
+    """
     if len(segment_paths) < 1:
         return False
     list_file = Path(output_path).with_suffix(".concat_list.txt")
+    # ~2 min budget per source minute, capped at 2 hours
+    encode_timeout = max(600, min(7200, len(segment_paths) * 120))
     try:
         # FFmpeg concat demuxer expects lines: file 'path' (escape single quotes in path)
         with open(list_file, "w", encoding="utf-8") as f:
@@ -177,15 +183,39 @@ def _concat_segments(segment_paths: List[str], output_path: str) -> bool:
                 path_str = Path(p).resolve().as_posix().replace("'", "'\\''")
                 f.write(f"file '{path_str}'\n")
         cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "concat", "-safe", "0", "-i", str(list_file),
-            "-c", "copy", str(output_path),
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-an",
+            str(output_path),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=encode_timeout)
         if result.returncode != 0:
-            logger.error(f"FFmpeg concat failed: {result.stderr}")
+            logger.error(f"FFmpeg concat/encode failed: {result.stderr}")
             return False
-        return Path(output_path).exists() and Path(output_path).stat().st_size > 0
+        out = Path(output_path)
+        if not out.exists() or out.stat().st_size == 0:
+            return False
+        logger.info("Concatenated and encoded for browser playback: %s", out.name)
+        return True
     finally:
         if list_file.exists():
             list_file.unlink(missing_ok=True)
@@ -492,6 +522,13 @@ async def shutdown_event():
         flush_raw_segments()
     except Exception as e:
         logger.warning(f"Error flushing raw segments on shutdown: {e}")
+
+    # Stop the RTSP restream proxy (if any) before tearing down the rest of the app
+    try:
+        from app.services.rtsp_proxy import stop_proxy
+        stop_proxy()
+    except Exception as e:
+        logger.warning(f"Error stopping RTSP proxy on shutdown: {e}")
 
     # Persist that recording was active so we can resume on next start
     from app.api.routes.recording import get_video_recorder, _raw_recording_active

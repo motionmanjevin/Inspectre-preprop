@@ -1,5 +1,5 @@
 import React, { useEffect, useState, type FormEvent } from "react";
-import { ApiError, authApi, deviceConfigApi } from "../services/api";
+import { ApiError, authApi, deviceConfigApi, whatsappApi, type WhatsAppLinkStart, type WhatsAppLinkStatus } from "../services/api";
 import { ChevronRight, ChevronLeft, Eye, EyeOff } from "lucide-react";
 
 interface RegisterPageProps {
@@ -48,6 +48,9 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
   const [r2MaxGb, setR2MaxGb] = useState(10);
 
   const [configSection, setConfigSection] = useState<"camera" | "r2" | "smtp" | "storage">("camera");
+  const [waLink, setWaLink] = useState<WhatsAppLinkStart | null>(null);
+  const [waStatus, setWaStatus] = useState<WhatsAppLinkStatus | null>(null);
+  const [waLoading, setWaLoading] = useState(false);
 
   useEffect(() => {
     const prevHtmlBg = document.documentElement.style.backgroundColor;
@@ -59,6 +62,13 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
       document.body.style.backgroundColor = prevBodyBg;
     };
   }, []);
+
+  useEffect(() => {
+    if (step === "choice") {
+      void refreshWhatsAppStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
@@ -134,6 +144,34 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
       else setError("Failed to continue setup.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshWhatsAppStatus = async () => {
+    setWaLoading(true);
+    setError(null);
+    try {
+      const s = await whatsappApi.getLinkStatus();
+      setWaStatus(s);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.detail || err.message || "Failed to load WhatsApp status");
+      else setError("Failed to load WhatsApp status.");
+    } finally {
+      setWaLoading(false);
+    }
+  };
+
+  const handleStartWhatsAppLink = async () => {
+    setWaLoading(true);
+    setError(null);
+    try {
+      const out = await whatsappApi.startLink();
+      setWaLink(out);
+      await refreshWhatsAppStatus();
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.detail || err.message || "Failed to start WhatsApp link");
+      else setError("Failed to start WhatsApp link.");
+      setWaLoading(false);
     }
   };
 
@@ -261,7 +299,7 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
               <button
                 type="button"
                 onClick={handleContinueOnDevice}
-                disabled={loading}
+                disabled={loading || waLoading || !(waStatus?.linked)}
                 className="w-full bg-white hover:bg-gray-200 text-[#0a0a0a] rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? "Please wait..." : "Continue on device"}
@@ -269,11 +307,44 @@ export function RegisterPage({ onRegister, onSwitchToLogin }: RegisterPageProps)
               <button
                 type="button"
                 onClick={handleContinueLater}
-                disabled={loading}
+                disabled={loading || waLoading || !(waStatus?.linked)}
                 className="w-full bg-[#1a1a1a] hover:bg-[#222] text-white rounded-xl py-3 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Continue later
               </button>
+            </div>
+            <div className="mt-5 rounded-xl border border-[#1a1a1a] bg-[#0a0a0a] p-4 space-y-3">
+              <p className="text-sm text-white font-medium">Link WhatsApp (required)</p>
+              <p className="text-xs text-gray-500">
+                Generate a code, then send <span className="text-gray-300 font-mono">LINK &lt;code&gt;</span> to your Inspectre WhatsApp number.
+              </p>
+              {waLink && (
+                <div className="rounded-lg border border-[#2a2a2a] p-3">
+                  <p className="text-xs text-gray-400">{waLink.instructions}</p>
+                  <p className="text-lg mt-1 font-mono tracking-wider text-[#00ff88]">{waLink.code}</p>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleStartWhatsAppLink}
+                  disabled={waLoading || loading}
+                  className="flex-1 bg-[#1a1a1a] hover:bg-[#222] text-white rounded-xl py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  {waLoading ? "Working..." : "Generate code"}
+                </button>
+                <button
+                  type="button"
+                  onClick={refreshWhatsAppStatus}
+                  disabled={waLoading || loading}
+                  className="flex-1 bg-[#1a1a1a] hover:bg-[#222] text-white rounded-xl py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  Check link
+                </button>
+              </div>
+              <p className={`text-xs ${waStatus?.linked ? "text-green-400" : "text-gray-500"}`}>
+                {waStatus?.linked ? "Linked successfully. You can continue setup." : "Not linked yet."}
+              </p>
             </div>
           </div>
         </div>

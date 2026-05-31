@@ -158,7 +158,10 @@ class MultiCameraGridRecorder:
         fallback = not force_active and (not enabled or not has_url)
 
         seg = (
-            f"{input_tag}scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
+            # Normalize each branch timeline before compositing so multi-RTSP jitter
+            # doesn't cause one/two tiles to stutter while others stay smooth.
+            f"{input_tag}fps={self.fps},setpts=N/FRAME_RATE/TB,"
+            f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
             f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2:black,"
             f"drawtext={font_prefix}text='{label}':x=8:y=h-th-8:fontsize=18:fontcolor=white:"
             f"box=1:boxcolor=black@0.55:boxborderw=4"
@@ -193,7 +196,8 @@ class MultiCameraGridRecorder:
         slot = int(cam["slot"])
         label = self._escape_text(str(cam["name"]))
         return (
-            f"{input_tag}scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
+            f"{input_tag}fps={self.fps},setpts=N/FRAME_RATE/TB,"
+            f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
             f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2:black,"
             f"geq=lum='0':cb='128':cr='128',"
             f"drawtext={font_prefix}text='{label}':x=8:y=h-th-8:fontsize=18:fontcolor=white:"
@@ -357,6 +361,7 @@ class MultiCameraGridRecorder:
             "-preset", "veryfast",
             "-crf", "23",
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
             "-f", "segment",
             "-segment_time", str(self.chunk_duration),
             "-reset_timestamps", "1",
@@ -453,6 +458,9 @@ class MultiCameraGridRecorder:
                     if stable_counts[fp] >= stable_polls_required:
                         self._seen_segments.add(fp)
                         stable_counts.pop(fp, None)
+                        from app.utils.mp4_browser import remux_faststart_copy
+
+                        remux_faststart_copy(fp, timeout=90)
                         if self.callback:
                             try:
                                 self.callback(fp)

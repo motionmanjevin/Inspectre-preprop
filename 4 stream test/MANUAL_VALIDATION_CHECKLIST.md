@@ -36,3 +36,15 @@
 - [ ] Confirm results still stream incrementally chunk-by-chunk.
 - [ ] Confirm autopilot processing behavior remains unchanged.
 
+## MediaMTX RTSP Restream Proxy (multi-camera stability)
+Pre-req: install MediaMTX (`mediamtx` binary on PATH). https://github.com/bluenviron/mediamtx
+- [ ] Set `RTSP_PROXY_ENABLED=true` in `.env`, restart backend.
+- [ ] Backend log shows `Starting MediaMTX RTSP proxy on 127.0.0.1:8554` with `cam1`/`cam2`/... paths.
+- [ ] Backend log shows `RTSP proxy active; recorder will read from N local restream paths`.
+- [ ] Open `rtsp://127.0.0.1:8554/cam1` in VLC and confirm the camera plays.
+- [ ] Confirm multi-camera grid chunks generate continuously and show all feeds smoothly (no HEVC `Duplicate POC` / `cu_qp_delta` errors in logs).
+- [ ] Disconnect one camera mid-recording; grid keeps producing chunks, only the disconnected slot freezes/goes No Signal.
+- [ ] Disable the proxy (`RTSP_PROXY_ENABLED=false`) and confirm system falls back to direct RTSP without errors.
+- [ ] Stop recording / shut down backend: log shows the proxy is stopped (no leftover `mediamtx` processes).
+- [ ] With proxy enabled but binary missing on PATH: backend logs a warning and falls back to direct RTSP without crashing.
+

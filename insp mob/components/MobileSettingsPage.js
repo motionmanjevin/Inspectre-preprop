@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { deviceConfigApi } from '../utils/api';
+import { deviceConfigApi, whatsappApi } from '../utils/api';
 
 const defaultMulti = [
   { slot: 1, name: 'Cam 1', rtsp_url: '', enabled: false },
@@ -38,6 +38,8 @@ export default function MobileSettingsPage({ onBack }) {
   const [smtpPassword, setSmtpPassword] = useState('');
   const [smtpFromAddress, setSmtpFromAddress] = useState('');
   const [setupStatus, setSetupStatus] = useState({ is_complete: false, missing_fields: [] });
+  const [waStatus, setWaStatus] = useState(null);
+  const [waLink, setWaLink] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +68,12 @@ export default function MobileSettingsPage({ onBack }) {
       setSmtpPassword(cfg.smtp_password || '');
       setSmtpFromAddress(cfg.smtp_from_address || '');
       setSetupStatus(cfg.setup_status || { is_complete: false, missing_fields: [] });
+      try {
+        const ws = await whatsappApi.getLinkStatus();
+        setWaStatus(ws);
+      } catch {
+        setWaStatus(null);
+      }
     } catch (e) {
       Alert.alert('Error', e?.message || 'Failed to load settings');
     } finally {
@@ -118,6 +126,37 @@ export default function MobileSettingsPage({ onBack }) {
     }
   };
 
+  const startWhatsAppLink = async () => {
+    try {
+      const out = await whatsappApi.startLink();
+      setWaLink(out);
+      const ws = await whatsappApi.getLinkStatus();
+      setWaStatus(ws);
+      Alert.alert('Link code generated', out.instructions);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Failed to start WhatsApp linking');
+    }
+  };
+
+  const refreshWhatsAppStatus = async () => {
+    try {
+      const ws = await whatsappApi.getLinkStatus();
+      setWaStatus(ws);
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Failed to load WhatsApp status');
+    }
+  };
+
+  const unlinkWhatsApp = async () => {
+    try {
+      await whatsappApi.unlink();
+      setWaLink(null);
+      await refreshWhatsAppStatus();
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Failed to unlink WhatsApp');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -143,6 +182,24 @@ export default function MobileSettingsPage({ onBack }) {
           {!setupStatus?.is_complete && Array.isArray(setupStatus?.missing_fields) && setupStatus.missing_fields.length > 0 && (
             <Text style={styles.statusHint}>Missing: {setupStatus.missing_fields.join(', ')}</Text>
           )}
+        </View>
+
+        <View style={styles.statusCard}>
+          <Text style={styles.statusTitle}>WhatsApp: {waStatus?.linked ? 'Linked' : 'Not linked'}</Text>
+          {waLink?.code ? <Text style={styles.statusHint}>Code: {waLink.code}</Text> : null}
+          <View style={styles.row}>
+            <TouchableOpacity style={styles.modeBtn} onPress={startWhatsAppLink}>
+              <Text style={styles.modeText}>Generate code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modeBtn} onPress={refreshWhatsAppStatus}>
+              <Text style={styles.modeText}>Refresh</Text>
+            </TouchableOpacity>
+            {waStatus?.linked ? (
+              <TouchableOpacity style={styles.modeBtn} onPress={unlinkWhatsApp}>
+                <Text style={styles.modeText}>Unlink</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
 
         <Text style={styles.section}>Camera</Text>

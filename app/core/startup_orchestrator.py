@@ -227,8 +227,21 @@ def _auto_start_raw_recording(rtsp_url_override: str | None = None, skip_probe: 
     if camera_mode == "multi":
         active_cameras = get_active_multi_cameras(cfg)
         if active_cameras:
+            from app.services.rtsp_proxy import start_proxy_if_enabled, remap_cameras_for_proxy
+            cameras_cfg = (cfg or {}).get("multi_cameras_json", []) or []
+            try:
+                proxy_mapping = start_proxy_if_enabled(cameras_cfg)
+            except Exception as e:
+                logger.warning("RTSP proxy start failed; using direct RTSP. Error: %s", e)
+                proxy_mapping = {}
+            cameras_for_recorder = remap_cameras_for_proxy(cameras_cfg, proxy_mapping)
+            if proxy_mapping:
+                logger.info(
+                    "RTSP proxy active; recorder will read from %d local restream paths",
+                    len(proxy_mapping),
+                )
             rec_mod._video_recorder = MultiCameraGridRecorder(
-                cameras=(cfg or {}).get("multi_cameras_json", []),
+                cameras=cameras_for_recorder,
                 output_dir=settings.RAW_FOOTAGE_DIR,
                 chunk_duration=60,
             )
@@ -259,6 +272,7 @@ def _stop_and_flush_recording():
     """Stop current recording and flush remaining segments as partial footage."""
     import app.api.routes.recording as rec_mod
     from app.main import flush_raw_segments
+    from app.services.rtsp_proxy import stop_proxy
 
     recorder = rec_mod._video_recorder
     if recorder and recorder.is_recording:
@@ -267,6 +281,11 @@ def _stop_and_flush_recording():
         except Exception as e:
             logger.warning("Error stopping recorder during RTSP recovery: %s", e)
     rec_mod._raw_recording_active = False
+
+    try:
+        stop_proxy()
+    except Exception as e:
+        logger.warning("Error stopping RTSP proxy: %s", e)
 
     try:
         flush_raw_segments()

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_ADDRESS: str = ""
     SMTP_USE_TLS: bool = True
+
+    # MediaMTX RTSP restream proxy (multi-camera stability)
+    RTSP_PROXY_ENABLED: bool = False
+    RTSP_PROXY_BIND_HOST: str = "127.0.0.1"
+    RTSP_PROXY_PORT: int = 8554
+    RTSP_PROXY_BINARY: str = "mediamtx"
     
     # Video Processing Settings
     VIDEO_PREPROMPT: str = (
@@ -79,6 +85,28 @@ class Settings(BaseSettings):
 
     # Payments / Billing Settings
     PAYMENTS_API_BASE_URL: str = os.getenv("PAYMENTS_API_BASE_URL", "http://localhost:8100")
+
+    # WhatsApp (WAHA - WhatsApp HTTP API)
+    WHATSAPP_ENABLED: bool = os.getenv("WHATSAPP_ENABLED", "false").lower() == "true"
+    WAHA_API_BASE_URL: str = os.getenv("WAHA_API_BASE_URL", os.getenv("EVOLUTION_API_BASE_URL", "")).rstrip("/")
+    WAHA_API_KEY: str = os.getenv("WAHA_API_KEY", os.getenv("EVOLUTION_API_KEY", ""))
+    WAHA_SESSION: str = os.getenv("WAHA_SESSION", os.getenv("EVOLUTION_INSTANCE", "default"))
+    WAHA_WEBHOOK_SECRET: str = os.getenv("WAHA_WEBHOOK_SECRET", os.getenv("EVOLUTION_WEBHOOK_SECRET", ""))
+    WAHA_SEND_TIMEOUT_SECONDS: int = int(os.getenv("WAHA_SEND_TIMEOUT_SECONDS", os.getenv("EVOLUTION_SEND_TIMEOUT_SECONDS", "15")))
+    # Legacy Evolution env names (deprecated; kept for backward compatibility during migration)
+    EVOLUTION_API_BASE_URL: str = WAHA_API_BASE_URL
+    EVOLUTION_API_KEY: str = WAHA_API_KEY
+    EVOLUTION_INSTANCE: str = WAHA_SESSION
+    EVOLUTION_WEBHOOK_SECRET: str = WAHA_WEBHOOK_SECRET
+    EVOLUTION_SEND_TIMEOUT_SECONDS: int = WAHA_SEND_TIMEOUT_SECONDS
+    WHATSAPP_LINK_CODE_TTL_MINUTES: int = int(os.getenv("WHATSAPP_LINK_CODE_TTL_MINUTES", "10"))
+    WHATSAPP_MAX_MESSAGES_PER_MINUTE: int = int(os.getenv("WHATSAPP_MAX_MESSAGES_PER_MINUTE", "20"))
+    WHATSAPP_DEFAULT_MAX_CHUNKS: int = int(os.getenv("WHATSAPP_DEFAULT_MAX_CHUNKS", "12"))
+    WHATSAPP_DISPLAY_NUMBER: str = os.getenv("WHATSAPP_DISPLAY_NUMBER", "")
+    WHATSAPP_VOICE_TRANSCRIPTION_ENABLED: bool = (
+        os.getenv("WHATSAPP_VOICE_TRANSCRIPTION_ENABLED", "true").lower() == "true"
+    )
+    QWEN_ASR_MODEL: str = os.getenv("QWEN_ASR_MODEL", "qwen3-asr-flash")
     
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

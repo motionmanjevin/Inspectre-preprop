@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from app.core.config import get_settings
+from app.services.whatsapp_repository import is_any_whatsapp_linked
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,9 @@ def get_setup_missing_fields(cfg: Optional[Dict[str, Any]] = None) -> List[str]:
         missing.append("env.SMTP_PASSWORD")
     if int(getattr(settings, "SMTP_PORT", 0) or 0) <= 0:
         missing.append("env.SMTP_PORT")
+
+    if bool(getattr(settings, "WHATSAPP_ENABLED", False)) and not is_any_whatsapp_linked():
+        missing.append("whatsapp.linked")
 
     return missing
 

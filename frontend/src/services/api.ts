@@ -378,9 +378,25 @@ export interface RawFootageListResponse {
   chunks: RawFootageItem[];
 }
 
+export interface CameraScopeOption {
+  id: string;
+  label: string;
+  slot?: number;
+  position?: string;
+}
+
+export interface CameraScopeOptionsResponse {
+  camera_mode: 'single' | 'multi';
+  options: CameraScopeOption[];
+}
+
 export const rawFootageApi = {
   async list(): Promise<RawFootageListResponse> {
     return apiRequest<RawFootageListResponse>('/raw/footage');
+  },
+
+  async cameraScope(): Promise<CameraScopeOptionsResponse> {
+    return apiRequest<CameraScopeOptionsResponse>('/raw/camera-scope');
   },
 
   /**
@@ -396,10 +412,18 @@ export const rawFootageApi = {
   /**
    * Start an incremental raw footage analysis job that processes chunks sequentially.
    */
-  async startJob(query: string, chunkIds: string[]): Promise<RawFootageJobCreateResponse> {
+  async startJob(
+    query: string,
+    chunkIds: string[],
+    cameraScope?: number[] | null
+  ): Promise<RawFootageJobCreateResponse> {
     return apiRequest<RawFootageJobCreateResponse>('/raw/jobs', {
       method: 'POST',
-      body: JSON.stringify({ query, chunk_ids: chunkIds }),
+      body: JSON.stringify({
+        query,
+        chunk_ids: chunkIds,
+        camera_scope: cameraScope ?? null,
+      }),
     });
   },
 
@@ -473,6 +497,67 @@ export const authApi = {
    */
   logout(): void {
     removeAuthToken();
+  },
+};
+
+/** Matches `BillingStateOut` from the backend billing proxy. */
+export interface BillingState {
+  subscription_status: string;
+  premium_valid_until: string | null;
+  query_credits: number;
+  free_queries_remaining: number;
+  free_autopilot_remaining: number;
+}
+
+export interface BillingCheckoutResponse {
+  pay_url: string;
+  transaction_id: number;
+}
+
+export const billingApi = {
+  async getState(): Promise<BillingState> {
+    return apiRequest<BillingState>('/billing/state');
+  },
+
+  async createCheckout(productId: string): Promise<BillingCheckoutResponse> {
+    return apiRequest<BillingCheckoutResponse>('/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ product_id: productId }),
+    });
+  },
+};
+
+export interface WhatsAppLinkStatus {
+  linked: boolean;
+  whatsapp_jid: string;
+  link_status: string;
+  verified_at: string;
+  link_expires_at: string;
+  display_number: string;
+}
+
+export interface WhatsAppLinkStart {
+  code: string;
+  expires_at: string;
+  display_number: string;
+  instructions: string;
+}
+
+export const whatsappApi = {
+  async getLinkStatus(): Promise<WhatsAppLinkStatus> {
+    return apiRequest<WhatsAppLinkStatus>('/whatsapp/link/status');
+  },
+
+  async startLink(): Promise<WhatsAppLinkStart> {
+    return apiRequest<WhatsAppLinkStart>('/whatsapp/link/start', {
+      method: 'POST',
+    });
+  },
+
+  async unlink(): Promise<{ status: string }> {
+    return apiRequest<{ status: string }>('/whatsapp/link/unlink', {
+      method: 'POST',
+    });
   },
 };
 
@@ -570,6 +655,7 @@ export default {
   health: healthApi,
   alerts: alertsApi,
   auth: authApi,
+  billing: billingApi,
   tunnel: tunnelApi,
   deviceConfig: deviceConfigApi,
   system: systemApi,

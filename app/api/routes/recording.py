@@ -80,8 +80,21 @@ async def start_recording(
                         status_code=400,
                         detail="Multi-camera mode is enabled but no active camera RTSP links are configured.",
                     )
+                from app.services.rtsp_proxy import start_proxy_if_enabled, remap_cameras_for_proxy
+                cameras_cfg = device_cfg.get("multi_cameras_json", []) or []
+                try:
+                    proxy_mapping = start_proxy_if_enabled(cameras_cfg)
+                except Exception as e:
+                    logger.warning("RTSP proxy start failed; using direct RTSP. Error: %s", e)
+                    proxy_mapping = {}
+                cameras_for_recorder = remap_cameras_for_proxy(cameras_cfg, proxy_mapping)
+                if proxy_mapping:
+                    logger.info(
+                        "RTSP proxy active; recorder will read from %d local restream paths",
+                        len(proxy_mapping),
+                    )
                 _video_recorder = MultiCameraGridRecorder(
-                    cameras=device_cfg.get("multi_cameras_json", []),
+                    cameras=cameras_for_recorder,
                     output_dir=output_dir,
                     chunk_duration=chunk_duration_seconds,
                 )
@@ -165,6 +178,11 @@ async def stop_recording(
         was_raw = _raw_recording_active
         _video_recorder.stop_recording()
         _raw_recording_active = False
+        try:
+            from app.services.rtsp_proxy import stop_proxy
+            stop_proxy()
+        except Exception as e:
+            logger.warning("Error stopping RTSP proxy: %s", e)
         if was_raw:
             from app.main import flush_raw_segments
             flush_raw_segments()

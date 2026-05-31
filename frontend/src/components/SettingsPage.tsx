@@ -1,8 +1,20 @@
 import { useState, useEffect } from "react";
-import { Save, Play, Square, Trash2, CheckCircle, AlertCircle, Loader2, Settings2, Server } from "lucide-react";
-import { recordingApi, healthApi, deviceConfigApi, type DeviceConfig } from "../services/api";
+import { Save, Play, Square, Trash2, CheckCircle, AlertCircle, Loader2, Settings2, Server, CreditCard, ExternalLink } from "lucide-react";
+import { recordingApi, healthApi, deviceConfigApi, billingApi, whatsappApi, getAuthToken, type DeviceConfig, type BillingState, type WhatsAppLinkStatus, type WhatsAppLinkStart } from "../services/api";
 
-type SettingsTab = "recording" | "device";
+const BILLING_PRODUCTS: Array<{ id: string; label: string; price: string; subtitle?: string }> = [
+  { id: "P15", label: "15 queries", price: "5 GHC" },
+  { id: "P30", label: "30 queries", price: "10 GHC" },
+  { id: "P50", label: "50 queries", price: "15 GHC" },
+  {
+    id: "PREMIUM_MONTHLY",
+    label: "Premium (1 month)",
+    price: "200 GHC",
+    subtitle: "Unlimited queries + 10 autopilots",
+  },
+];
+
+type SettingsTab = "recording" | "device" | "billing";
 type CameraMode = "single" | "multi";
 type CameraSlot = { slot: number; name: string; rtsp_url: string; enabled: boolean };
 
@@ -50,8 +62,16 @@ export function SettingsPage() {
   const [dcLocalStorageMaxGb, setDcLocalStorageMaxGb] = useState(50);
   const [dcR2MaxGb, setDcR2MaxGb] = useState(10);
   const [dcLoading, setDcLoading] = useState(false);
+  const [waStatus, setWaStatus] = useState<WhatsAppLinkStatus | null>(null);
+  const [waLink, setWaLink] = useState<WhatsAppLinkStart | null>(null);
+  const [waLoading, setWaLoading] = useState(false);
 
   const [dcSection, setDcSection] = useState<"camera" | "r2" | "smtp" | "storage">("camera");
+
+  const [billingState, setBillingState] = useState<BillingState | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [checkoutProductId, setCheckoutProductId] = useState<string | null>(null);
 
   useEffect(() => {
     const savedSettings = localStorage.getItem('inspectre_settings');
@@ -75,6 +95,36 @@ export function SettingsPage() {
   useEffect(() => { checkBackendStatus(); checkRecordingStatus(); }, []);
 
   useEffect(() => { loadDeviceConfig(); }, []);
+
+  useEffect(() => {
+    if (activeTab === "device") {
+      void loadWhatsAppStatus();
+    }
+  }, [activeTab]);
+
+  const loadBillingState = async () => {
+    if (!getAuthToken()) {
+      setBillingState(null);
+      setBillingLoading(false);
+      setBillingError("Sign in to view billing and make purchases.");
+      return;
+    }
+    setBillingLoading(true);
+    setBillingError("");
+    try {
+      const s = await billingApi.getState();
+      setBillingState(s);
+    } catch {
+      setBillingState(null);
+      setBillingError("Could not load billing. Check that the payments service is configured.");
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "billing") void loadBillingState();
+  }, [activeTab]);
 
   const loadDeviceConfig = async () => {
     try {
@@ -105,6 +155,47 @@ export function SettingsPage() {
       setDcR2MaxGb(cfg.r2_max_gb);
     } catch {
       // not configured yet
+    }
+  };
+
+  const loadWhatsAppStatus = async () => {
+    setWaLoading(true);
+    try {
+      const status = await whatsappApi.getLinkStatus();
+      setWaStatus(status);
+    } catch {
+      setWaStatus(null);
+    } finally {
+      setWaLoading(false);
+    }
+  };
+
+  const startWhatsAppLink = async () => {
+    setWaLoading(true);
+    try {
+      const out = await whatsappApi.startLink();
+      setWaLink(out);
+      const status = await whatsappApi.getLinkStatus();
+      setWaStatus(status);
+      showStatus("success", "WhatsApp link code generated.");
+    } catch {
+      showStatus("error", "Could not start WhatsApp link.");
+    } finally {
+      setWaLoading(false);
+    }
+  };
+
+  const unlinkWhatsApp = async () => {
+    setWaLoading(true);
+    try {
+      await whatsappApi.unlink();
+      setWaLink(null);
+      await loadWhatsAppStatus();
+      showStatus("success", "WhatsApp unlinked.");
+    } catch {
+      showStatus("error", "Could not unlink WhatsApp.");
+    } finally {
+      setWaLoading(false);
     }
   };
 
@@ -162,6 +253,26 @@ export function SettingsPage() {
       showStatus('error', `Failed to clear database: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setShowClearDialog(false);
     } finally { setIsLoading(false); }
+  };
+
+  const handleBillingCheckout = async (productId: string) => {
+    if (!getAuthToken()) {
+      showStatus("error", "Sign in to purchase.");
+      return;
+    }
+    setCheckoutProductId(productId);
+    try {
+      const res = await billingApi.createCheckout(productId);
+      if (res?.pay_url) {
+        window.open(res.pay_url, "_blank", "noopener,noreferrer");
+      } else {
+        showStatus("error", "No payment URL returned.");
+      }
+    } catch {
+      showStatus("error", "Could not start checkout. Try again later.");
+    } finally {
+      setCheckoutProductId(null);
+    }
   };
 
   const handleSaveDeviceConfig = async () => {
@@ -278,6 +389,15 @@ export function SettingsPage() {
             style={{ color: activeTab === "device" ? "#000000" : undefined }}
           >
             <Server size={16} /> Device &amp; Cloud
+          </button>
+          <button
+            onClick={() => setActiveTab("billing")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors ${
+              activeTab === "billing" ? "bg-white" : "text-gray-400 hover:text-white"
+            }`}
+            style={{ color: activeTab === "billing" ? "#000000" : undefined }}
+          >
+            <CreditCard size={16} /> Billing
           </button>
         </div>
 
@@ -405,9 +525,161 @@ export function SettingsPage() {
           </div>
         )}
 
+        {/* === BILLING TAB === */}
+        {activeTab === "billing" && (
+          <div className="space-y-6">
+            <p className="text-gray-500 text-sm">
+              Query credits, premium subscription, and checkout use the same products as the mobile app.
+            </p>
+
+            {billingLoading && (
+              <div className="flex items-center gap-3 text-gray-400">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Loading billing status…</span>
+              </div>
+            )}
+
+            {!billingLoading && billingError && (
+              <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-red-400 text-sm">{billingError}</span>
+                {getAuthToken() ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadBillingState()}
+                    className="text-sm text-white underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            {billingState && !billingLoading && (
+              <>
+                <div className="rounded-xl border border-[#1a1a1a] bg-[#0f0f0f] p-5 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 justify-between">
+                    <span className="text-white font-medium">
+                      {billingState.subscription_status === "premium" ? "Premium" : "Base"}
+                    </span>
+                    {billingState.subscription_status === "premium" && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-[#00ff88] text-black font-medium">Premium</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-300">
+                    <span className="text-gray-500">Query credits: </span>
+                    <span className="font-semibold text-white tabular-nums">{billingState.query_credits}</span>
+                  </p>
+                  <p className="text-sm text-gray-300">
+                    <span className="text-gray-500">Free queries remaining: </span>
+                    <span className="font-semibold text-white tabular-nums">{billingState.free_queries_remaining}</span>
+                  </p>
+                  <p className="text-sm text-gray-300">
+                    <span className="text-gray-500">Free autopilots remaining: </span>
+                    <span className="font-semibold text-white tabular-nums">{billingState.free_autopilot_remaining}</span>
+                  </p>
+                  {billingState.premium_valid_until && (
+                    <p className="text-xs text-gray-500 pt-1">
+                      Renews / expires:{" "}
+                      {new Date(billingState.premium_valid_until).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <h2 className="text-white text-sm font-medium mb-2">Buy query packs</h2>
+                  <p className="text-gray-500 text-xs mb-3">Opens secure payment in a new tab.</p>
+                  <div className="space-y-2">
+                    {BILLING_PRODUCTS.filter((p) => p.id !== "PREMIUM_MONTHLY").map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={checkoutProductId !== null}
+                        onClick={() => void handleBillingCheckout(p.id)}
+                        className="w-full flex items-center justify-between gap-3 rounded-lg border border-[#1a1a1a] bg-[#0f0f0f] px-4 py-3 text-left hover:border-[#2a2a2a] transition-colors disabled:opacity-50"
+                      >
+                        <div>
+                          <div className="text-white text-sm font-medium">{p.label}</div>
+                          <div className="text-gray-500 text-xs">{p.price}</div>
+                        </div>
+                        {checkoutProductId === p.id ? (
+                          <Loader2 className="w-5 h-5 animate-spin text-[#00ff88] shrink-0" />
+                        ) : (
+                          <ExternalLink className="w-4 h-4 text-gray-500 shrink-0" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-white text-sm font-medium mb-2">Premium subscription</h2>
+                  <div className="rounded-xl border border-[#1a1a1a] bg-[#0f0f0f] p-4 flex flex-col md:flex-row md:items-center gap-4">
+                    <div className="flex-1 space-y-1">
+                      <p className="text-white text-sm font-medium">Unlimited queries</p>
+                      <p className="text-gray-500 text-xs">
+                        10 free autopilots per month. Extra autopilots use query credits.
+                      </p>
+                      <p className="text-[#00ff88] text-sm font-medium">200 GHC / month</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={checkoutProductId !== null}
+                      onClick={() => void handleBillingCheckout("PREMIUM_MONTHLY")}
+                      className="shrink-0 px-5 py-2.5 rounded-lg bg-[#00ff88] text-black text-sm font-semibold hover:bg-[#00dd77] transition-colors disabled:opacity-50 flex items-center justify-center gap-2 min-w-[8rem]"
+                    >
+                      {checkoutProductId === "PREMIUM_MONTHLY" ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : billingState.subscription_status === "premium" ? (
+                        "Manage"
+                      ) : (
+                        "Upgrade"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* === DEVICE & CLOUD TAB === */}
         {activeTab === "device" && (
           <div className="space-y-6">
+            <div className="rounded-xl border border-[#1a1a1a] bg-[#0f0f0f] p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-white text-sm font-medium">WhatsApp Linking</p>
+                  <p className="text-xs text-gray-500">Required for WhatsApp query channel.</p>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${waStatus?.linked ? "bg-green-900/40 text-green-300" : "bg-[#1a1a1a] text-gray-400"}`}>
+                  {waStatus?.linked ? "Linked" : "Not linked"}
+                </span>
+              </div>
+              {waLink && (
+                <div className="rounded-lg border border-[#2a2a2a] p-3">
+                  <p className="text-xs text-gray-400">{waLink.instructions}</p>
+                  <p className="text-lg mt-1 font-mono tracking-wider text-[#00ff88]">{waLink.code}</p>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button onClick={startWhatsAppLink} disabled={waLoading} className="bg-[#1a1a1a] hover:bg-[#222] text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50">
+                  {waLoading ? "Working..." : "Generate code"}
+                </button>
+                <button onClick={() => void loadWhatsAppStatus()} disabled={waLoading} className="bg-[#1a1a1a] hover:bg-[#222] text-white px-3 py-2 rounded-lg text-sm disabled:opacity-50">
+                  Refresh status
+                </button>
+                {waStatus?.linked && (
+                  <button onClick={unlinkWhatsApp} disabled={waLoading} className="bg-[#2a1a1a] hover:bg-[#3a1f1f] text-red-200 px-3 py-2 rounded-lg text-sm disabled:opacity-50">
+                    Unlink
+                  </button>
+                )}
+              </div>
+            </div>
+
             <div className="flex gap-2 flex-wrap">
               {(["camera", "r2", "smtp", "storage"] as const).map((id) => (
                 <button

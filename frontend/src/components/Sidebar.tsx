@@ -1,4 +1,4 @@
-import { X, Settings, LogOut, Smartphone } from "lucide-react";
+import { X, Settings, LogOut, Smartphone, MessagesSquare } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { searchApi, recordingApi, tunnelApi, ProcessingStatsResponse, RecordingStatus } from "../services/api";
@@ -7,7 +7,7 @@ import { QRCodeSVG } from "qrcode.react";
 export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onNavigate: (page: "settings") => void;
+  onNavigate: (page: "settings" | "webLocalChat") => void;
   onRefreshChat: () => void;
   onLogout: () => void;
 }) {
@@ -147,13 +147,16 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
 
           {/* Recording status */}
           {recordingStatus?.recording && (
-            <div className="mt-4 bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+            <div className="mt-4 bg-green-500/10 border border-green-500/20 rounded-lg p-3 overflow-hidden">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shrink-0" />
                 <span className="text-xs text-green-400 font-medium">Recording Active</span>
               </div>
               {recordingStatus.rtsp_url && (
-                <div className="text-[11px] text-green-400/70 mt-1 break-all">
+                <div
+                  className="text-[11px] text-green-400/70 mt-1 truncate"
+                  title={recordingStatus.rtsp_url}
+                >
                   {recordingStatus.rtsp_url}
                 </div>
               )}
@@ -185,8 +188,15 @@ export function Sidebar({ isOpen, onClose, onNavigate, onRefreshChat, onLogout }
         {/* Footer Info */}
         <div className="p-6 border-t border-[#1a1a1a] space-y-4">
           <div className="space-y-4">
-            {/* Settings Button (primary destination on web) */}
+            {/* Primary navigation */}
             <div className="flex gap-2 flex-wrap">
+              <button 
+                onClick={() => onNavigate("webLocalChat")}
+                className="flex-1 flex items-center justify-center p-3 bg-[#111827] hover:bg-[#1f2937] rounded-lg transition-colors min-w-[60px]"
+                title="Web Local Chat"
+              >
+                <MessagesSquare className="w-5 h-5 text-gray-200" />
+              </button>
               <button 
                 onClick={() => onNavigate("settings")}
                 className="flex-1 flex items-center justify-center p-3 bg-[#111827] hover:bg-[#1f2937] rounded-lg transition-colors min-w-[60px]"

@@ -1,5 +1,6 @@
 import { Sidebar } from "./components/Sidebar";
 import { SettingsPage } from "./components/SettingsPage";
+import { WebLocalChatPage } from "./components/WebLocalChatPage";
 import { LoginPage } from "./components/LoginPage";
 import { RegisterPage } from "./components/RegisterPage";
 import { StartupPopup } from "./components/StartupPopup";
@@ -11,7 +12,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState<"settings">("settings");
+  const [currentPage, setCurrentPage] = useState<"settings" | "webLocalChat">("webLocalChat");
   const [showStartupPopup, setShowStartupPopup] = useState(false);
   const [rtspErrorStatus, setRtspErrorStatus] = useState<SystemStatus | null>(null);
   const chatPageRef = useRef<{ clearMessages: () => void; getMessages: () => any[]; restoreMessages: (messages: any[]) => void } | null>(null);
@@ -103,10 +104,14 @@ export default function App() {
       />
       
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-4 md:p-8">
-          {currentPage === "settings" && <SettingsPage />}
-        </div>
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        {currentPage === "webLocalChat" ? (
+          <WebLocalChatPage />
+        ) : (
+          <div className="p-4 md:p-8">
+            {currentPage === "settings" && <SettingsPage />}
+          </div>
+        )}
       </main>
     </div>
   );

@@ -460,16 +460,13 @@ def process_pending_autopilot_chunks() -> None:
         maybe_run_autopilot_for_chunk(filename)
 
 
-@router.get("/footage", response_model=RawFootageListResponse)
-async def list_footage(
-    current_user: dict = Depends(get_current_user)
-) -> RawFootageListResponse:
-    """List raw footage chunks (1-hour files) from the footage directory and R2."""
+def build_raw_footage_items() -> list[RawFootageItem]:
+    """Build raw footage metadata list (newest first), including synthetic live item when active."""
     settings = get_settings()
     footage_dir = Path(settings.RAW_FOOTAGE_DIR)
     items: list[RawFootageItem] = []
     if not footage_dir.exists():
-        return RawFootageListResponse(chunks=[])
+        return items
 
     for path in sorted(footage_dir.glob("footage_*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True):
         name = path.name
@@ -478,11 +475,10 @@ async def list_footage(
             size_bytes = stat.st_size
         except OSError:
             size_bytes = 0
-        # Parse footage_YYYYMMDD_HHMMSS.mp4 or footage_YYYYMMDD_HHMMSS_partial.mp4
-        stem = path.stem  # footage_20260218_160000 or footage_20260218_160000_partial
+        stem = path.stem
         parts = stem.replace("footage_", "").split("_")
-        date_str = parts[0] if len(parts) >= 1 else ""  # 20260218
-        time_str = parts[1] if len(parts) >= 2 else ""  # 160000
+        date_str = parts[0] if len(parts) >= 1 else ""
+        time_str = parts[1] if len(parts) >= 2 else ""
         if len(date_str) == 8:
             date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
         if len(time_str) == 6:
@@ -501,7 +497,6 @@ async def list_footage(
             )
         )
 
-    # Optionally include a synthetic "live" item for the in-progress hour
     has_live, seg_done, seg_total = get_live_raw_segments_state()
     if has_live:
         now = datetime.utcnow()
@@ -519,8 +514,15 @@ async def list_footage(
                 segments_total=seg_total,
             ),
         )
+    return items
 
-    return RawFootageListResponse(chunks=items)
+
+@router.get("/footage", response_model=RawFootageListResponse)
+async def list_footage(
+    current_user: dict = Depends(get_current_user)
+) -> RawFootageListResponse:
+    """List raw footage chunks (1-hour files) from the footage directory and R2."""
+    return RawFootageListResponse(chunks=build_raw_footage_items())
 
 
 @router.get("/camera-scope", response_model=CameraScopeOptionsResponse)

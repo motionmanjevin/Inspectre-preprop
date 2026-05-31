@@ -9,6 +9,7 @@ import hashlib
 import bcrypt
 
 from app.core.config import get_settings
+from app.services.whatsapp_repository import init_whatsapp_tables, get_link_by_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class UserService:
         
         conn.commit()
         conn.close()
+        init_whatsapp_tables()
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection."""
@@ -225,3 +227,15 @@ class UserService:
         
         conn.commit()
         conn.close()
+
+    def get_whatsapp_link_status(self, user_id: int) -> Dict:
+        row = get_link_by_user_id(user_id)
+        if not row:
+            return {"linked": False, "whatsapp_jid": "", "link_status": "none"}
+        return {
+            "linked": str(row["link_status"] or "") == "linked" and bool(str(row["whatsapp_jid"] or "").strip()),
+            "whatsapp_jid": str(row["whatsapp_jid"] or ""),
+            "link_status": str(row["link_status"] or "none"),
+            "verified_at": str(row["verified_at"] or ""),
+            "link_expires_at": str(row["link_expires_at"] or ""),
+        }
